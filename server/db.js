@@ -318,6 +318,33 @@ const getOutbox = (limit = 30) =>
   db.prepare("SELECT id, kind, status, error, attempts, created_at, updated_at FROM outbox ORDER BY (status='pending') DESC, id DESC LIMIT ?")
     .all(limit);
 
+// ── Usage tracking (real Claude tokens/cost per day) ───────────
+// Accumulates today's spend so the UI can show live token usage. `today` is the
+// caller's local date string (YYYY-MM-DD) so the day rolls over correctly by tz.
+const addUsage = ({ input = 0, output = 0, cacheCreate = 0, cacheRead = 0, cost = 0 }, today) => {
+  if (getSetting("usage_day") !== today) {
+    setSetting("usage_day", today);
+    setSetting("usage_calls", "0");
+    setSetting("usage_tokens", "0");
+    setSetting("usage_cost", "0");
+  }
+  const tokens = input + output + cacheCreate + cacheRead;
+  setSetting("usage_calls", String(Number(getSetting("usage_calls") || 0) + 1));
+  setSetting("usage_tokens", String(Number(getSetting("usage_tokens") || 0) + tokens));
+  setSetting("usage_cost", String(Number(getSetting("usage_cost") || 0) + cost));
+};
+
+const getUsage = (today) => {
+  const sameDay = getSetting("usage_day") === today;
+  return {
+    day: getSetting("usage_day") || today,
+    calls: sameDay ? Number(getSetting("usage_calls") || 0) : 0,
+    tokens: sameDay ? Number(getSetting("usage_tokens") || 0) : 0,
+    cost: sameDay ? Number(getSetting("usage_cost") || 0) : 0,
+    autoGens: (getSetting("auto_gen_day") === today) ? Number(getSetting("auto_gen_count") || 0) : 0,
+  };
+};
+
 // ── Memory vectors (semantic memory / RAG) ─────────────────────
 const hasVector = (source, extId) =>
   !!db.prepare("SELECT 1 FROM memory_vectors WHERE source = ? AND ext_id = ?").get(source, extId);
@@ -361,4 +388,5 @@ module.exports = {
   hasVector, addVector, allVectors, countVectors, sampleVectorText,
   enqueueOutbox, nextPendingOutbox, hasPendingOutbox, countPendingOutbox,
   markOutboxDone, markOutboxFailed, bumpOutboxAttempt, getOutboxJob, getOutbox,
+  addUsage, getUsage,
 };

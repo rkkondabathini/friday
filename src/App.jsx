@@ -207,6 +207,7 @@ export default function App() {
   const [slashRes, setSlashRes] = useState([]);
   const [conns,    setConns]    = useState([]);
   const [status,   setStatus]   = useState(null);
+  const [usage,    setUsage]    = useState(null);
   const [banner,   setBanner]   = useState(null);
   const [sheetUrl, setSheetUrl] = useState(null);
   const [memStats, setMemStats] = useState(null);
@@ -244,6 +245,7 @@ export default function App() {
     try { const p = await api.getProfile(); setProfile(p.profile || null); } catch {}
     try { const dr = await api.getDirectives(); setDirectives(dr.directives || []); } catch {}
     try { const st = await api.getStatus(); setStatus(st); } catch {}
+    try { const u = await api.getUsage(); setUsage(u); } catch {}
   };
 
   const addDirective = async () => {
@@ -318,6 +320,7 @@ export default function App() {
   useEffect(() => {
     const poll = setInterval(async () => {
       try { const st = await api.getStatus(); setStatus(st); } catch {}
+      try { const u = await api.getUsage(); setUsage(u); } catch {}
       try {
         const res = await api.getBriefing();
         if (res.briefing) {
@@ -894,6 +897,15 @@ export default function App() {
           FRIDAY v1.0 · {lastSaved ? `synced ${lastSaved.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})}` : ""}
         </span>
         <span style={{ display:"flex", gap:12, alignItems:"center" }}>
+          {usage && (
+            <span title={`Today's real Claude usage (from your subscription).\n${usage.calls} call${usage.calls===1?"":"s"} · ${usage.tokens.toLocaleString()} tokens · ~$${usage.cost.toFixed(2)} equiv.\nAuto-briefings: ${usage.autoGens}/${usage.autoCap} (cap). ~15.6k tokens/call is fixed Claude Code overhead.`}
+              style={{ fontSize:10, display:"inline-flex", alignItems:"center", gap:4, ...M,
+                color: usage.cost > 3 ? T.red : usage.cost > 1 ? T.amber : T.green }}>
+              <i className="ti ti-bolt" style={{ fontSize:12 }} />
+              {usage.calls} · {usage.tokens >= 1000 ? (usage.tokens/1000).toFixed(0)+"k" : usage.tokens} tok · ${usage.cost.toFixed(2)}
+              <span style={{ color:T.dim }}>· {usage.autoGens}/{usage.autoCap}</span>
+            </span>
+          )}
           <button onClick={() => setShowDirectives(true)} title="Standing priorities FRIDAY always keeps in mind"
             style={{ fontSize:10, color:T.amber, background:"transparent", border:"none", display:"inline-flex", alignItems:"center", gap:4, ...M }}>
             <i className="ti ti-flag" style={{ fontSize:12 }} />{directives.length} priorities

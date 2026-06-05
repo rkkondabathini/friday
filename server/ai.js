@@ -27,9 +27,10 @@ class OfflineError extends Error {
 const classifyClaudeError = (text = "") => {
   const t = text.toLowerCase();
   if (/usage limit|rate limit|too many requests|quota|429|limit reached|reached your|out of (credits|usage)/.test(t)) {
-    // Try to recover a reset time if Claude mentioned one (epoch seconds/ms).
+    // Recover a reset time if present. Claude's limit message is often of the form
+    // "Claude usage limit reached|1749200400" — i.e. a trailing epoch (s or ms).
     let resetAt = null;
-    const epoch = t.match(/reset[^0-9]{0,12}(\d{10,13})/);
+    const epoch = t.match(/(\d{10,13})/);
     if (epoch) { const n = Number(epoch[1]); resetAt = new Date(epoch[1].length > 10 ? n : n * 1000).toISOString(); }
     return new ClaudeLimitError("Claude usage limit reached" + (resetAt ? ` (resets ${resetAt})` : ""), resetAt);
   }
@@ -67,12 +68,17 @@ const getAnthropicResponse = async (messages, systemPrompt, maxTokens = 2000) =>
   return res.content.filter(b => b.type === "text").map(b => b.text).join("");
 };
 
+// Optional hook: index.js sets this to record real per-call token usage/cost.
+let usageSink = null;
+const setUsageSink = (fn) => { usageSink = fn; };
+
 // ── Local Claude Code (subscription, no API key) ──────────────
 const getClaudeCliResponse = (messages, systemPrompt) =>
   new Promise((resolve, reject) => {
     const bin = process.env.CLAUDE_CLI_PATH || "claude";
     // --strict-mcp-config skips loading all MCP connectors (huge startup saving).
-    const args = ["-p", "--output-format", "text", "--strict-mcp-config"];
+    // --output-format json so we get back exact token usage + cost for tracking.
+    const args = ["-p", "--output-format", "json", "--strict-mcp-config"];
     if (process.env.CLAUDE_CLI_MODEL) args.push("--model", process.env.CLAUDE_CLI_MODEL);
 
     // Use the Claude SUBSCRIPTION login, not an API key. Any ANTHROPIC_API_KEY in
@@ -93,16 +99,34 @@ const getClaudeCliResponse = (messages, systemPrompt) =>
     child.on("error", e => { clearTimeout(timer); reject(new OfflineError("claude cli not runnable: " + e.message)); });
     child.on("close", code => {
       clearTimeout(timer);
-      if (code !== 0) {
-        const blob = `${err}\n${out}`;
+      let parsed = null;
+      try { parsed = JSON.parse(out); } catch { /* not json (maybe an error on stderr) */ }
+
+      // Record real usage whenever the CLI reported it (even on error turns).
+      if (parsed && parsed.usage && usageSink) {
+        const u = parsed.usage;
+        try {
+          usageSink({
+            input: u.input_tokens || 0,
+            output: u.output_tokens || 0,
+            cacheCreate: u.cache_creation_input_tokens || 0,
+            cacheRead: u.cache_read_input_tokens || 0,
+            cost: parsed.total_cost_usd || 0,
+          });
+        } catch { /* tracking must never break generation */ }
+      }
+
+      const blob = `${err}\n${out}\n${parsed?.result || ""}`;
+      if (code !== 0 || (parsed && parsed.is_error)) {
         const typed = classifyClaudeError(blob);
         if (typed) return reject(typed);
         return reject(new Error(`claude cli exited ${code}: ${(err || out || "no output").slice(0, 400)}`));
       }
-      // Some limit conditions come back on stdout with exit 0 — catch those too.
-      const typed = classifyClaudeError(out);
-      if (typed && typed.isClaudeLimit && out.trim().length < 400) return reject(typed);
-      resolve(out.trim());
+      const text = parsed ? String(parsed.result ?? "") : out;
+      // Some limit conditions come back as a short result with exit 0 — catch those.
+      const typed = classifyClaudeError(text);
+      if (typed && typed.isClaudeLimit && text.trim().length < 400) return reject(typed);
+      resolve(text.trim());
     });
 
     const full = `${systemPrompt}\n\n=== CONVERSATION ===\n${messages.map(m => `${m.role === "user" ? "USER" : "ASSISTANT"}: ${m.content}`).join("\n\n")}`;
@@ -247,4 +271,4 @@ Return ONLY valid JSON, no markdown fences, exactly this shape:
   return JSON.parse(jsonStr);
 };
 
-module.exports = { chat, generateBriefing, buildSystemPrompt, ClaudeLimitError, OfflineError, classifyClaudeError };
+module.exports = { chat, generateBriefing, buildSystemPrompt, ClaudeLimitError, OfflineError, classifyClaudeError, setUsageSink };

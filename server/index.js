@@ -7,7 +7,8 @@ require("dotenv").config();
 const crypto = require("crypto");
 const express = require("express");
 const cors = require("cors");
-const { chat, generateBriefing } = require("./ai");
+const ai = require("./ai");
+const { chat, generateBriefing } = ai;
 const db = require("./db");
 const queue = require("./queue");
 const google = require("./connectors/google");
@@ -19,6 +20,13 @@ const PORT = process.env.PORT || 3001;
 const APP_BASE = process.env.APP_BASE || "http://localhost:5173";
 
 const connectors = { google, slack };
+
+// User's local date (YYYY-MM-DD) — used for per-day usage/throttle accounting.
+const USER_TZ = (require("../src/context.json").user || {}).timezone || "Asia/Kolkata";
+const todayInTz = () => new Date().toLocaleDateString("en-CA", { timeZone: USER_TZ });
+
+// Record every real Claude call's tokens + cost (reported by the CLI's JSON output).
+ai.setUsageSink((u) => { try { db.addUsage(u, todayInTz()); } catch (e) { console.warn("usage track failed:", e.message); } });
 
 // Record a memory locally AND mirror it to the Google Sheet (best-effort)
 const logMemory = (type, content) => {
@@ -470,6 +478,12 @@ app.post("/api/sync", async (req, res) => {
 
 // Queue / Claude-availability status (drives the UI's "queued / at limit" banner)
 app.get("/api/status", (req, res) => res.json(queue.status()));
+
+// Today's real Claude usage — tokens, cost, calls, auto-gen count + the daily cap.
+app.get("/api/usage", (req, res) => {
+  const u = db.getUsage(todayInTz());
+  res.json({ ...u, autoCap: Number(process.env.AUTO_MAX_PER_DAY || 8) });
+});
 
 // Recent queued jobs (UI shows what's waiting / lets chat pick up its answer)
 app.get("/api/outbox", (req, res) => res.json({ jobs: db.getOutbox(30), ...queue.status() }));

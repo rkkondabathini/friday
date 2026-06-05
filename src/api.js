@@ -70,6 +70,9 @@ export const sync = () =>
 export const getStatus = () =>
   req("GET", "/api/status");
 
+export const getUsage = () =>
+  req("GET", "/api/usage");
+
 export const getOutboxJob = (id) =>
   req("GET", `/api/outbox/${id}`);
 
