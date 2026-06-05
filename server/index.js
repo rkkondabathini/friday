@@ -1,0 +1,464 @@
+/**
+ * FRIDAY Express Server
+ * Handles AI chat, briefing storage, task management, and n8n webhooks
+ */
+
+require("dotenv").config();
+const crypto = require("crypto");
+const express = require("express");
+const cors = require("cors");
+const { chat, generateBriefing } = require("./ai");
+const db = require("./db");
+const google = require("./connectors/google");
+const slack = require("./connectors/slack");
+const rag = require("./rag");
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+const APP_BASE = process.env.APP_BASE || "http://localhost:5173";
+
+const connectors = { google, slack };
+
+// Record a memory locally AND mirror it to the Google Sheet (best-effort)
+const logMemory = (type, content) => {
+  db.addMemory(type, content);
+  if (db.getConnection("google")) {
+    google.appendMemory(type, content).catch(e => console.warn("sheet memory sync failed:", e.message));
+  }
+};
+
+app.use(cors());
+app.use(express.json({ limit: "10mb" }));
+
+// ── Health check ───────────────────────────────────────────────
+app.get("/health", (req, res) => {
+  res.json({ status: "ok", provider: process.env.AI_PROVIDER || "openai", version: "1.0.0" });
+});
+
+// ── Briefing endpoints ─────────────────────────────────────────
+
+// GET today's briefing (or latest)
+app.get("/api/briefing", (req, res) => {
+  const date = req.query.date || new Date().toISOString().split("T")[0];
+  const briefing = db.getBriefing(date) || db.getLatestBriefing();
+  const overrides = db.getTaskOverrides();
+  const customTasks = db.getCustomTasks();
+  res.json({ briefing, overrides, customTasks });
+});
+
+// GET briefing history
+app.get("/api/briefing/history", (req, res) => {
+  const history = db.getBriefingHistory(7);
+  res.json({ history });
+});
+
+// POST save a briefing (called by n8n or manually)
+app.post("/api/briefing", (req, res) => {
+  // Optional: verify n8n webhook secret
+  const secret = req.headers["x-friday-secret"];
+  if (process.env.N8N_WEBHOOK_SECRET && secret !== process.env.N8N_WEBHOOK_SECRET) {
+    return res.status(401).json({ error: "unauthorized" });
+  }
+  const { briefing, date, source } = req.body;
+  if (!briefing) return res.status(400).json({ error: "briefing required" });
+  const d = date || new Date().toISOString().split("T")[0];
+  db.saveBriefing(d, briefing, source || "n8n");
+  res.json({ ok: true, date: d });
+});
+
+// POST generate a fresh briefing from raw data
+app.post("/api/briefing/generate", async (req, res) => {
+  try {
+    const { gmail, calendar, slack } = req.body;
+    const carryForward = db.getCarryForwardTasks();
+    const directives = db.getDirectives().map(d => d.text);
+    const briefing = await generateBriefing(gmail || [], calendar || [], slack || [], carryForward, directives);
+    const date = new Date().toISOString().split("T")[0];
+    db.saveBriefing(date, briefing, "generated");
+    res.json({ ok: true, briefing, date });
+  } catch (e) {
+    console.error("Briefing generation error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Task endpoints ─────────────────────────────────────────────
+
+// PATCH update task status
+app.patch("/api/tasks/:id/status", (req, res) => {
+  const { status } = req.body;
+  const validStatuses = ["Not Started", "In Progress", "Waiting on Others", "Completed"];
+  if (!validStatuses.includes(status)) return res.status(400).json({ error: "invalid status" });
+  db.setTaskStatus(req.params.id, status);
+
+  // Track pattern: if task is completed, log it
+  if (status === "Completed") {
+    logMemory("task_completed", `Task ${req.params.id} completed`);
+  }
+  res.json({ ok: true });
+});
+
+// GET all task overrides
+app.get("/api/tasks/overrides", (req, res) => {
+  res.json({ overrides: db.getTaskOverrides() });
+});
+
+// POST add custom task
+app.post("/api/tasks/custom", (req, res) => {
+  const task = req.body;
+  if (!task.id || !task.task) return res.status(400).json({ error: "id and task required" });
+  db.saveCustomTask(task);
+  res.json({ ok: true, task });
+});
+
+// GET custom tasks
+app.get("/api/tasks/custom", (req, res) => {
+  res.json({ tasks: db.getCustomTasks() });
+});
+
+// DELETE custom task
+app.delete("/api/tasks/custom/:id", (req, res) => {
+  db.deleteCustomTask(req.params.id);
+  res.json({ ok: true });
+});
+
+// ── Chat endpoint ──────────────────────────────────────────────
+app.post("/api/chat", async (req, res) => {
+  try {
+    const { messages, briefingContext } = req.body;
+    if (!messages || !Array.isArray(messages)) return res.status(400).json({ error: "messages array required" });
+
+    const recentMemory = db.getRecentMemory(10);
+    const patterns = db.getTopPatterns(5);
+    const carryForward = db.getCarryForwardTasks();
+
+    // Semantic recall: pull the most relevant learned history for this question
+    let recalled = [];
+    try {
+      const lastUser = [...messages].reverse().find(m => m.role === "user");
+      if (lastUser) recalled = await rag.recall(lastUser.content, 6);
+    } catch (e) { console.warn("recall failed:", e.message); }
+
+    const profile = db.getSetting("professional_profile");
+    const orgMap = db.getSetting("org_map");
+    const directives = db.getDirectives();
+
+    const extraContext = `
+${directives.length ? `STANDING PRIORITIES & DIRECTIVES (things ${"Ravi"} told you to always keep in mind — weight heavily):\n${directives.map(d => `- ${d.text}`).join("\n")}\n` : ""}
+${orgMap ? `ORG STRUCTURE (who's who at Masai):\n${orgMap}\n` : ""}
+${profile ? `PROFESSIONAL PROFILE (learned from history):\n${profile}\n` : ""}
+RELEVANT HISTORY (semantically recalled from your email/calendar/slack):
+${recalled.length ? rag.formatRecall(recalled) : "None yet"}
+
+CURRENT BRIEFING CONTEXT:
+${JSON.stringify(briefingContext || {})}
+
+RECENT MEMORY (last 10 events):
+${recentMemory.map(m => `[${m.date}] ${m.type}: ${m.content}`).join("\n")}
+
+TOP PATTERNS OBSERVED:
+${patterns.map(p => `- "${p.pattern}" (${p.occurrences}x, last seen ${p.last_seen})`).join("\n")}
+
+CARRY-FORWARD TASKS FROM YESTERDAY:
+${carryForward.map(t => `- [${t.priority}] ${t.task} (${t.status})`).join("\n") || "None"}
+    `.trim();
+
+    const reply = await chat(messages, extraContext);
+    res.json({ reply });
+  } catch (e) {
+    console.error("Chat error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Memory endpoint ────────────────────────────────────────────
+app.post("/api/memory", (req, res) => {
+  const { type, content } = req.body;
+  if (!type || !content) return res.status(400).json({ error: "type and content required" });
+  logMemory(type, content);
+  res.json({ ok: true });
+});
+
+// Where is FRIDAY's memory sheet? (does not create — just reports)
+app.get("/api/memory/sheet", (req, res) => {
+  res.json({ url: google.sheetUrl(), connected: !!db.getConnection("google") });
+});
+
+// Push all existing local memory into the sheet (one-time catch-up)
+app.post("/api/memory/backfill", async (req, res) => {
+  try {
+    if (!db.getConnection("google")) return res.status(400).json({ error: "google not connected" });
+    const mem = db.getRecentMemory(1000)
+      .map(m => ({ timestamp: m.created_at, type: m.type, content: m.content }))
+      .reverse();
+    const url = await google.appendMemoryRows(mem);
+    res.json({ ok: true, count: mem.length, url });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Directives: standing priorities the user tells FRIDAY to keep ──
+app.get("/api/directives", (req, res) => {
+  res.json({ directives: db.getDirectives() });
+});
+
+app.post("/api/directives", (req, res) => {
+  const { text, tag } = req.body;
+  if (!text || !text.trim()) return res.status(400).json({ error: "text required" });
+  const id = db.addDirective(text.trim(), tag || null);
+  logMemory("directive", `Standing priority added: ${text.trim()}`);
+  res.json({ ok: true, id, directives: db.getDirectives() });
+});
+
+app.delete("/api/directives/:id", (req, res) => {
+  db.deleteDirective(Number(req.params.id));
+  res.json({ ok: true, directives: db.getDirectives() });
+});
+
+// ── Semantic memory (RAG) ──────────────────────────────────────
+
+// Stats: how much has FRIDAY learned
+app.get("/api/memory/stats", (req, res) => {
+  res.json(db.countVectors());
+});
+
+// Ingest arbitrary items into memory: [{ source, ext_id, date, title, text }]
+app.post("/api/memory/ingest", async (req, res) => {
+  try {
+    const items = req.body.items || [];
+    if (!Array.isArray(items) || !items.length) return res.status(400).json({ error: "items[] required" });
+    const valid = items.filter(it => it && it.source && it.ext_id && it.text);
+    const result = await rag.ingest(valid);
+    res.json({ ok: true, ...result, totals: db.countVectors() });
+  } catch (e) {
+    console.error("ingest error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Backfill Gmail + Calendar history straight from the Google connector
+app.post("/api/memory/backfill/google", async (req, res) => {
+  try {
+    if (!db.getConnection("google")) return res.status(400).json({ error: "google not connected" });
+    const days = Number(req.body.days) || 60;
+    const [mail, cal] = await Promise.all([
+      google.fetchGmailHistory(days, Number(req.body.maxEmails) || 300),
+      google.fetchCalendarHistory(days),
+    ]);
+    const result = await rag.ingest([...mail, ...cal]);
+    res.json({ ok: true, fetched: { gmail: mail.length, calendar: cal.length }, ...result, totals: db.countVectors() });
+  } catch (e) {
+    console.error("google backfill error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Recall test / API: most relevant memories for a query
+app.get("/api/memory/recall", async (req, res) => {
+  try {
+    const items = await rag.recall(req.query.q || "", Number(req.query.k) || 6);
+    res.json({ items });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Synthesize a professional profile from the corpus and store it
+app.post("/api/memory/profile", async (req, res) => {
+  try {
+    const sample = db.sampleVectorText(140);
+    if (!sample.length) return res.status(400).json({ error: "no memory to profile yet" });
+    const corpus = sample.map(s => `[${s.source}] ${s.title || ""} ${s.text}`.slice(0, 300)).join("\n");
+    const prompt = `Below is a sample of ${sample.length} recent work items (emails, meetings, Slack) for this operations leader. Write a concise professional profile in Markdown with these sections:
+- **What I own day-to-day** (recurring responsibilities)
+- **Key stakeholders & how I work with them**
+- **Recurring themes & priorities**
+- **Working patterns** (where my time goes, what I delegate vs handle)
+- **Growth opportunities** (1-3 specific, evidence-based suggestions)
+
+Be specific and grounded in the data. No preamble.\n\nWORK ITEMS:\n${corpus}`;
+    const profile = await chat([{ role: "user", content: prompt }], "", 1500);
+    db.setSetting("professional_profile", profile);
+    logMemory("profile", "Professional profile synthesized from " + sample.length + " items");
+    res.json({ ok: true, profile });
+  } catch (e) {
+    console.error("profile error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/api/memory/profile", (req, res) => {
+  res.json({ profile: db.getSetting("professional_profile") });
+});
+
+// ── n8n webhook (incoming briefings from automation) ──────────
+app.post("/webhook/briefing", (req, res) => {
+  const secret = req.headers["x-friday-secret"];
+  if (process.env.N8N_WEBHOOK_SECRET && secret !== process.env.N8N_WEBHOOK_SECRET) {
+    return res.status(401).json({ error: "unauthorized" });
+  }
+  const { briefing, date } = req.body;
+  if (!briefing) return res.status(400).json({ error: "briefing required" });
+  db.saveBriefing(date || new Date().toISOString().split("T")[0], briefing, "n8n");
+  console.log("✅ Briefing received from n8n:", date);
+  res.json({ ok: true });
+});
+
+// ── Patterns endpoint ──────────────────────────────────────────
+app.get("/api/patterns", (req, res) => {
+  res.json({ patterns: db.getTopPatterns(10) });
+});
+
+// ── Connections / OAuth ────────────────────────────────────────
+
+// Status of every provider: is it set up (has client id) + is it connected
+app.get("/api/connections", (req, res) => {
+  const connected = Object.fromEntries(db.getConnections().map(c => [c.provider, c]));
+  const status = Object.entries(connectors).map(([provider, c]) => ({
+    provider,
+    configured: c.isConfigured(),
+    connected: !!connected[provider],
+    account: connected[provider]?.account || null,
+  }));
+  res.json({ connections: status });
+});
+
+// Step 1 — kick off the OAuth dance
+app.get("/api/auth/:provider", (req, res) => {
+  const c = connectors[req.params.provider];
+  if (!c) return res.status(404).json({ error: "unknown provider" });
+  if (!c.isConfigured()) {
+    return res
+      .status(400)
+      .send(`<h3>${req.params.provider} is not set up yet</h3>
+        <p>Add its CLIENT_ID and CLIENT_SECRET to <code>.env</code>, then restart the server. See <code>CONNECTORS.md</code>.</p>`);
+  }
+  res.redirect(c.getAuthUrl());
+});
+
+// Step 2 — provider redirects back here with a code
+app.get("/api/auth/:provider/callback", async (req, res) => {
+  const c = connectors[req.params.provider];
+  if (!c) return res.status(404).send("unknown provider");
+  const { code, error } = req.query;
+  if (error) return res.redirect(`${APP_BASE}/?connect=${req.params.provider}&status=denied`);
+  if (!code) return res.redirect(`${APP_BASE}/?connect=${req.params.provider}&status=error`);
+  try {
+    await c.handleCallback(code);
+    res.redirect(`${APP_BASE}/?connect=${req.params.provider}&status=ok`);
+  } catch (e) {
+    console.error(`${req.params.provider} OAuth error:`, e.message);
+    res.redirect(`${APP_BASE}/?connect=${req.params.provider}&status=error`);
+  }
+});
+
+// Disconnect a provider
+app.delete("/api/connections/:provider", (req, res) => {
+  db.deleteConnection(req.params.provider);
+  res.json({ ok: true });
+});
+
+// ── Sync: cache-style. Only (re)generate when inputs actually changed. ──
+// A fingerprint of the current inputs (mail/calendar/slack). If it matches the
+// last run, we serve the stored briefing untouched — no Claude call.
+const inputSignature = (gmail, calendar, slack) => {
+  const payload = JSON.stringify({
+    g: (gmail || []).map(m => m.id).sort(),
+    c: (calendar || []).map(e => `${e.id}:${e.start}`).sort(),
+    s: (slack || []).map(m => (m.id || m.text || "").slice(0, 60)).sort(),
+  });
+  return crypto.createHash("sha256").update(payload).digest("hex");
+};
+
+let genInFlight = false; // only ONE briefing generation at a time
+
+// Pull current inputs from connected sources (+ any injected slack)
+const gatherInputs = async (slackInput = null) => {
+  const conns = Object.fromEntries(db.getConnections().map(c => [c.provider, true]));
+  const injectedSlack = Array.isArray(slackInput) ? slackInput : null;
+  const [gmail, calendar, nativeSlack] = await Promise.all([
+    conns.google ? google.fetchGmail() : Promise.resolve([]),
+    conns.google ? google.fetchCalendar() : Promise.resolve([]),
+    (!injectedSlack && conns.slack) ? slack.fetchSlack() : Promise.resolve([]),
+  ]);
+  const slackMsgs = injectedSlack || nativeSlack;
+  return { gmail, calendar, slackMsgs, hasSource: !!(conns.google || conns.slack || injectedSlack) };
+};
+
+// Generate via the configured engine (Claude CLI) and persist
+const generateAndSave = async (gmail, calendar, slackMsgs, sig, date) => {
+  genInFlight = true;
+  try {
+    const carryForward = db.getCarryForwardTasks();
+    const directives = db.getDirectives().map(d => d.text);
+    const briefing = await generateBriefing(gmail, calendar, slackMsgs, carryForward, directives);
+    db.saveBriefing(date, briefing, "sync");
+    db.setSetting("input_signature", sig);
+    if (briefing?.summary?.focus_of_day) logMemory("briefing", `${date}: ${briefing.summary.focus_of_day}`);
+    return briefing;
+  } finally {
+    genInFlight = false;
+  }
+};
+
+// NON-BLOCKING sync: returns immediately. If inputs changed, generation runs in
+// the background (Claude takes a few min) and the UI's poll picks up the result.
+app.post("/api/sync", async (req, res) => {
+  try {
+    const force = !!(req.body?.force || req.query.force);
+    const { gmail, calendar, slackMsgs, hasSource } = await gatherInputs(req.body?.slack);
+    if (!hasSource) return res.status(400).json({ error: "no sources connected" });
+
+    const date = new Date().toISOString().split("T")[0];
+    const sig = inputSignature(gmail, calendar, slackMsgs);
+    const existing = db.getBriefing(date);
+    const counts = { gmail: gmail.length, calendar: calendar.length, slack: slackMsgs.length };
+
+    // CACHE HIT — nothing changed
+    if (!force && existing && db.getSetting("input_signature") === sig) {
+      return res.json({ ok: true, cached: true, generating: false, briefing: existing, date, counts });
+    }
+    // Already generating — just acknowledge
+    if (genInFlight) {
+      return res.json({ ok: true, generating: true, briefing: existing || null, date, counts });
+    }
+    // Kick off generation in the background; respond right away
+    generateAndSave(gmail, calendar, slackMsgs, sig, date)
+      .catch(e => console.error("background generation failed:", e.message));
+    res.json({ ok: true, generating: true, briefing: existing || null, date, counts });
+  } catch (e) {
+    console.error("Sync error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Auto-refresh: every N minutes, check inputs and regenerate ONLY if changed ──
+const AUTO_REFRESH_MIN = Number(process.env.AUTO_REFRESH_MINUTES || 30);
+if (AUTO_REFRESH_MIN > 0) {
+  setInterval(async () => {
+    try {
+      if (!db.getConnection("google") || genInFlight) return;
+      const { gmail, calendar, slackMsgs, hasSource } = await gatherInputs(null);
+      if (!hasSource) return;
+      const date = new Date().toISOString().split("T")[0];
+      const sig = inputSignature(gmail, calendar, slackMsgs);
+      const existing = db.getBriefing(date);
+      if (existing && db.getSetting("input_signature") === sig) return; // unchanged
+      console.log("🔄 auto-refresh: inputs changed → regenerating briefing");
+      await generateAndSave(gmail, calendar, slackMsgs, sig, date);
+    } catch (e) {
+      console.warn("auto-refresh failed:", e.message);
+    }
+  }, AUTO_REFRESH_MIN * 60 * 1000);
+}
+
+const server = app.listen(PORT, () => {
+  console.log(`\n🧠 FRIDAY server running on http://localhost:${PORT}`);
+  console.log(`   AI Provider: ${process.env.AI_PROVIDER || "openai"}`);
+  console.log(`   Model: ${process.env.CLAUDE_CLI_MODEL || process.env.OPENAI_MODEL || "default"}\n`);
+});
+// Briefing generation via Claude can take a while — don't let the socket time out.
+server.timeout = 0;
+server.requestTimeout = 0;
+server.headersTimeout = 0;

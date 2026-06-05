@@ -1,0 +1,21 @@
+node_modules/
+dist/
+
+# Environment
+.env
+
+# Database
+friday.db
+friday.db-shm
+friday.db-wal
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+
+# Internal / personal data — kept local only (real PII & briefing content)
+OrgTree*.csv
+artifacts screenshots/
