@@ -416,20 +416,63 @@ const gatherInputs = async (slackInput = null) => {
   return { gmail, calendar, slackMsgs, hasSource: !!(conns.google || conns.slack || injectedSlack) };
 };
 
+// ── Open Loops: what's still on YOU (tagged/emailed, not replied) — inferred from
+// your real behaviour, no manual tracking. Cached briefly (Slack/Gmail API-heavy). ──
+let _openLoopsCache = { at: 0, data: null };
+const OPEN_LOOPS_TTL_MS = 3 * 60 * 1000;
+const gatherOpenLoops = async (force = false) => {
+  if (!force && _openLoopsCache.data && Date.now() - _openLoopsCache.at < OPEN_LOOPS_TTL_MS) return _openLoopsCache.data;
+  const conns = Object.fromEntries(db.getConnections().map(c => [c.provider, true]));
+  const [email, slackTags] = await Promise.all([
+    conns.google ? google.fetchGmailOpenLoops() : Promise.resolve([]),
+    conns.slack ? slack.fetchSlackOpenLoops() : Promise.resolve([]),
+  ]);
+  // Email is the low-signal channel — surface unread first, then most recent, and
+  // cap it so the UI doesn't drown. Slack (his real channel) is kept in full.
+  const emailOpen = email
+    .filter(t => !t.lastFromMe)
+    .sort((a, b) => (b.unread - a.unread) || (new Date(b.date) - new Date(a.date)))
+    .slice(0, 12);
+  const slackOpen = slackTags.filter(m => !m.replied);
+  const emailOpenTotal = email.filter(t => !t.lastFromMe).length;
+  const data = {
+    slack: slackTags, email,
+    slackOpen, emailOpen,
+    summary: {
+      slackOpen: slackOpen.length, slackClosed: slackTags.length - slackOpen.length,
+      emailOpen: emailOpenTotal, emailClosed: email.length - emailOpenTotal,
+      emailUnread: email.filter(t => !t.lastFromMe && t.unread).length,
+      emailShown: emailOpen.length,
+    },
+    at: new Date().toISOString(),
+  };
+  _openLoopsCache = { at: Date.now(), data };
+  return data;
+};
+
 // ── Queue jobs ─────────────────────────────────────────────────
 // The briefing job re-gathers FRESH inputs at run time, so a job parked during a
 // usage-limit window reflects reality when it finally runs (offline-sync style).
-const runBriefingJob = async () => {
+const runBriefingJob = async ({ force = false } = {}) => {
   const { gmail, calendar, slackMsgs, hasSource } = await gatherInputs(null);
   if (!hasSource) return { ok: false, skipped: "no sources connected" };
   const date = new Date().toISOString().split("T")[0];
   const sig = inputSignature(gmail, calendar, slackMsgs);
   const existing = db.getBriefing(date);
-  if (existing && db.getSetting("input_signature") === sig) return { ok: true, cached: true, date };
+  if (!force && existing && db.getSetting("input_signature") === sig) return { ok: true, cached: true, date };
   const carryForward = db.getCarryForwardTasks();
   const directives = db.getDirectives().map(d => d.text);
   const learnedTopics = JSON.parse(db.getSetting("learned_topics") || "[]");
-  const briefing = await generateBriefing(gmail, calendar, slackMsgs, carryForward, directives, learnedTopics);
+  const openLoops = await gatherOpenLoops(true).catch(() => null);
+  const briefing = await generateBriefing(gmail, calendar, slackMsgs, carryForward, directives, learnedTopics, openLoops);
+
+  // Passive learning: record what was open vs closed so FRIDAY learns your real
+  // response behaviour over time (which channels/people you close fast vs let slide).
+  if (openLoops) {
+    const s = openLoops.summary;
+    logMemory("open_loops", `Open: ${s.slackOpen} slack, ${s.emailOpen} email (${s.emailUnread} unread). Closed since: ${s.slackClosed} slack, ${s.emailClosed} email.`);
+    briefing.open_loops = { slack: openLoops.slackOpen, email: openLoops.emailOpen, summary: s };
+  }
 
   // Daily lesson: keep ONE per day stable across regenerations, and remember it so
   // we never repeat a topic. (Costs no extra Claude calls — it's part of the briefing.)
@@ -476,7 +519,7 @@ app.post("/api/sync", async (req, res) => {
       return res.json({ ok: true, cached: true, generating: false, briefing: existing, date, counts, ...queue.status() });
     }
 
-    const { id } = queue.enqueue("generate_briefing", { date });
+    const { id } = queue.enqueue("generate_briefing", { date, force });
     const st = queue.status();
     res.json({
       ok: true,
@@ -498,6 +541,18 @@ app.get("/api/usage", (req, res) => {
   const u = db.getUsage(todayInTz());
   const cap = (process.env.AUTO_TIMES || "12:00,16:00,20:00").split(",").filter(Boolean).length;
   res.json({ ...u, autoCap: cap });
+});
+
+// Open Loops — what's still on you (tagged/emailed, not replied), auto-detected.
+app.get("/api/openloops", async (req, res) => {
+  try {
+    if (!db.getConnection("google") && !db.getConnection("slack")) return res.json({ slackOpen: [], emailOpen: [], summary: {} });
+    const data = await gatherOpenLoops(!!req.query.force);
+    res.json(data);
+  } catch (e) {
+    console.error("openloops error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // Recent queued jobs (UI shows what's waiting / lets chat pick up its answer)

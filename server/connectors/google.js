@@ -139,6 +139,55 @@ const fetchCalendar = async () => {
   }));
 };
 
+// OPEN LOOPS — inbox threads, flagged by whether YOU have replied. "Open" = the
+// last message in the thread is not from you (it's on you). Also reports read vs
+// unread, so FRIDAY can tell "consciously parked" from "not yet seen". No manual
+// tracking — this is inferred from your actual mailbox.
+const fetchGmailOpenLoops = async (days = 4, max = 25) => {
+  const { google } = require("googleapis");
+  const auth = authedClient();
+  if (!auth) return [];
+  const gmail = google.gmail({ version: "v1", auth });
+  const myEmail = (db.getConnection("google")?.account || "").toLowerCase();
+
+  const list = await gmail.users.threads.list({
+    userId: "me",
+    q: `newer_than:${days}d in:inbox -category:promotions -category:social -category:updates -category:forums`,
+    maxResults: max,
+  });
+  const ids = (list.data.threads || []).map((t) => t.id);
+
+  const loops = await Promise.all(
+    ids.map((id) =>
+      gmail.users.threads
+        .get({ userId: "me", id, format: "metadata", metadataHeaders: ["From", "Subject", "Date"] })
+        .then((r) => {
+          const msgs = r.data.messages || [];
+          if (!msgs.length) return null;
+          const last = msgs[msgs.length - 1];
+          const first = msgs[0];
+          const lastFrom = decodeHeader(last.payload.headers || [], "From").toLowerCase();
+          const lastFromMe = !!myEmail && lastFrom.includes(myEmail);
+          const repliedByMe = msgs.some((m) =>
+            decodeHeader(m.payload.headers || [], "From").toLowerCase().includes(myEmail));
+          return {
+            id,
+            from: decodeHeader(first.payload.headers || [], "From"),
+            subject: decodeHeader(first.payload.headers || [], "Subject"),
+            snippet: last.snippet || r.data.snippet || "",
+            date: decodeHeader(last.payload.headers || [], "Date"),
+            unread: (last.labelIds || []).includes("UNREAD"),
+            messages: msgs.length,
+            lastFromMe,
+            repliedByMe,
+          };
+        })
+        .catch(() => null)
+    )
+  );
+  return loops.filter(Boolean);
+};
+
 // ── Backfill: wider history for semantic memory ────────────────
 
 // Fetch up to `max` messages matching a Gmail query, as memory items
@@ -313,6 +362,6 @@ const readMemory = async (limit = 200) => {
 
 module.exports = {
   isConfigured, getAuthUrl, handleCallback, fetchGmail, fetchCalendar, SCOPES,
-  fetchGmailHistory, fetchCalendarHistory,
+  fetchGmailOpenLoops, fetchGmailHistory, fetchCalendarHistory,
   ensureMemorySheet, appendMemory, appendMemoryRows, readMemory, sheetUrl,
 };

@@ -96,4 +96,80 @@ const fetchSlack = async (max = 15) => {
   }));
 };
 
-module.exports = { isConfigured, getAuthUrl, handleCallback, fetchSlack, USER_SCOPES };
+// Resolve my own Slack handle
+const myHandle = async (token, userId) => {
+  try { const me = await call(token, "users.info", { user: userId }); return me.ok ? me.user?.name : null; }
+  catch { return null; }
+};
+
+// OPEN LOOPS — messages where I was tagged, flagged by whether I replied in-thread.
+// Uses conversations.replies (precise) to detect my reply; no manual tracking.
+const fetchSlackOpenLoops = async (max = 20, days = 4) => {
+  const conn = db.getConnection("slack");
+  if (!conn) return [];
+  const token = conn.tokens.access_token;
+  const myId = conn.tokens.user_id;
+  const handle = await myHandle(token, myId);
+  if (!handle) return [];
+
+  const since = new Date(Date.now() - days * 86400000).toISOString().split("T")[0];
+
+  // Pull mentions of me AND my own recent sent messages in parallel. The sent
+  // messages let us catch CHANNEL-level replies (not just threaded ones), which
+  // conversations.replies alone would miss.
+  const [res, mineRes] = await Promise.all([
+    call(token, "search.messages", { query: `@${handle} after:${since}`, count: max, sort: "timestamp" }).catch(() => ({ ok: false })),
+    call(token, "search.messages", { query: `from:@${handle} after:${since}`, count: 100, sort: "timestamp" }).catch(() => ({ ok: false })),
+  ]);
+  if (!res.ok) return [];
+
+  // channel name → sorted list of my message timestamps in that channel
+  const myMsgsByChannel = {};
+  for (const mm of (mineRes.messages?.matches || [])) {
+    const ch = mm.channel?.name;
+    if (!ch) continue;
+    (myMsgsByChannel[ch] = myMsgsByChannel[ch] || []).push(Number(mm.ts));
+  }
+  const repliedInChannelAfter = (channel, ts) =>
+    (myMsgsByChannel[channel] || []).some(t => t > Number(ts));
+
+  // Drop automation/bot posts and messages that actually @-tag SOMEONE ELSE (not me)
+  // — both show up in search noise but aren't really loops on me.
+  const myTag = `<@${myId}`;
+  const looksAutomated = (u = "") => /bot|request|notification|reminder|workflow|noreply|trigger|alert|digest/i.test(u);
+  const seen = new Set();
+  const relevant = (res.messages?.matches || []).filter((m) => {
+    if (looksAutomated(m.username || "")) return false;
+    // if the message tags people but NOT me, it's not my loop
+    const tagsSomeone = /<@[A-Z0-9]+/i.test(m.text || "");
+    if (tagsSomeone && !(m.text || "").includes(myTag)) return false;
+    const key = `${m.channel?.name}|${(m.text || "").slice(0, 60)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  return Promise.all(relevant.map(async (m) => {
+    const channelId = m.channel?.id;
+    const channelName = m.channel?.name;
+    let replied = repliedInChannelAfter(channelName, m.ts); // channel-level reply
+    if (!replied) {
+      try {
+        const rep = await call(token, "conversations.replies", { channel: channelId, ts: m.ts, limit: 50 });
+        if (rep.ok) replied = (rep.messages || []).some(r => r.user === myId && Number(r.ts) > Number(m.ts));
+      } catch { /* no history access for this channel — treat as open */ }
+    }
+    return {
+      id: m.iid || m.ts,
+      channel: m.channel?.name,
+      user: m.username,
+      text: m.text,
+      ts: m.ts,
+      ageHours: Math.max(0, Math.round((Date.now() / 1000 - Number(m.ts)) / 3600)),
+      slack_url: m.permalink,
+      replied,
+    };
+  }));
+};
+
+module.exports = { isConfigured, getAuthUrl, handleCallback, fetchSlack, fetchSlackOpenLoops, USER_SCOPES };

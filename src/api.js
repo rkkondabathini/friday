@@ -73,6 +73,9 @@ export const getStatus = () =>
 export const getUsage = () =>
   req("GET", "/api/usage");
 
+export const getOpenLoops = (force) =>
+  req("GET", `/api/openloops${force ? "?force=1" : ""}`);
+
 export const getOutboxJob = (id) =>
   req("GET", `/api/outbox/${id}`);
 

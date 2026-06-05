@@ -92,10 +92,9 @@ const Blk     = ({ children, style={}, accent }) => (
     borderRadius:5, padding:"12px 16px", marginBottom:8, ...style }}>{children}</div>
 );
 const Lbl     = ({ children }) => (
-  <div style={{ fontSize:11, fontWeight:700, color:T.muted, letterSpacing:".12em",
-    textTransform:"uppercase", marginBottom:10, paddingBottom:8,
-    borderBottom:`1px solid ${T.border}`, ...M }}>
-    <span style={{ color:T.green+"99" }}>//</span> {children}
+  <div style={{ fontSize:11, fontWeight:700, color:T.muted, letterSpacing:".1em",
+    textTransform:"uppercase", marginBottom:10, marginTop:2, ...M }}>
+    {children}
   </div>
 );
 const Note    = ({ children }) => (
@@ -208,6 +207,8 @@ export default function App() {
   const [conns,    setConns]    = useState([]);
   const [status,   setStatus]   = useState(null);
   const [usage,    setUsage]    = useState(null);
+  const [loops,    setLoops]    = useState(null);
+  const [loopsBusy,setLoopsBusy]= useState(false);
   const [banner,   setBanner]   = useState(null);
   const [sheetUrl, setSheetUrl] = useState(null);
   const [memStats, setMemStats] = useState(null);
@@ -246,6 +247,7 @@ export default function App() {
     try { const dr = await api.getDirectives(); setDirectives(dr.directives || []); } catch {}
     try { const st = await api.getStatus(); setStatus(st); } catch {}
     try { const u = await api.getUsage(); setUsage(u); } catch {}
+    try { const lp = await api.getOpenLoops(); setLoops(lp); } catch {}
   };
 
   const addDirective = async () => {
@@ -272,6 +274,12 @@ export default function App() {
   };
 
   const anyConnected = conns.some(c => c.connected);
+
+  const refreshLoops = async () => {
+    setLoopsBusy(true);
+    try { const lp = await api.getOpenLoops(true); setLoops(lp); } catch {}
+    setLoopsBusy(false);
+  };
 
   // " (resets ~3:40 PM)" — friendly reset time for the usage-limit messaging
   const fmtReset = (iso) => iso
@@ -321,6 +329,7 @@ export default function App() {
     const poll = setInterval(async () => {
       try { const st = await api.getStatus(); setStatus(st); } catch {}
       try { const u = await api.getUsage(); setUsage(u); } catch {}
+      try { const lp = await api.getOpenLoops(); setLoops(lp); } catch {}
       try {
         const res = await api.getBriefing();
         if (res.briefing) {
@@ -493,6 +502,10 @@ export default function App() {
   const pend  = taskList.filter(t => t.status !== "Completed").length;
   const meets = (schedule || []).filter(b => b.type === "meeting").length;
   const fups  = (briefing?.stakeholder_followups || []).length;
+  const slackOpen = loops?.slackOpen || [];
+  const emailOpen = loops?.emailOpen || [];
+  const sOpen = loops?.summary?.slackOpen ?? slackOpen.length;
+  const eOpen = loops?.summary?.emailOpen ?? emailOpen.length;
   const now   = new Date();
   const timeStr = now.toLocaleTimeString("en-IN", { hour:"2-digit", minute:"2-digit", hour12:false });
   const dateStr = now.toLocaleDateString("en-IN", { weekday:"short", day:"2-digit", month:"short" });
@@ -641,25 +654,30 @@ export default function App() {
 
       <ConnectBar conns={conns} onConnect={doConnect} onDisconnect={doDisconnect} />
 
-      <XPBar tasks={data?.action_items || []} overrides={ov} />
-
-      {/* Metrics */}
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8, marginBottom:14 }}>
-        {[[p1,"P1 critical",T.red],[pend,"pending",T.blue],[meets,"meetings",T.green],[fups,"follow-ups",T.amber]]
-          .map(([v,l,c]) => (
-            <div key={l} style={{ background:T.card, border:`1px solid ${c}22`, borderRadius:5, padding:"10px 12px" }}>
-              <div style={{ fontSize:24, fontWeight:700, color:c, ...M }}>{v}</div>
-              <div style={{ fontSize:10, color:c+"99", marginTop:2, ...M }}>{l}</div>
+      {/* Metrics — what's actually on you (auto-detected) */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8, marginBottom:16 }}>
+        {[[sOpen,"slack open",T.slack,"ti-brand-slack"],
+          [eOpen,"email open",T.cal,"ti-mail"],
+          [meets,"meetings",T.green,"ti-calendar-event"],
+          [fups,"follow-ups",T.amber,"ti-user-up"]]
+          .map(([v,l,c,ic]) => (
+            <div key={l} style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:8, padding:"12px 14px" }}>
+              <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                <i className={`ti ${ic}`} style={{ fontSize:13, color:c }} />
+                <span style={{ fontSize:22, fontWeight:700, color:T.bright, ...M }}>{v}</span>
+              </div>
+              <div style={{ fontSize:10, color:T.dim, marginTop:3, letterSpacing:".04em", ...M }}>{l}</div>
             </div>
           ))}
       </div>
 
       {/* Tabs */}
-      <div style={{ display:"flex", gap:2, marginBottom:14, background:T.panel, borderRadius:5, padding:3, border:`1px solid ${T.border}` }}>
-        {["briefing","standup","tasks","schedule"].map(t => (
-          <button key={t} onClick={() => setTab(t)} style={{ flex:1, fontSize:13, padding:"8px", border:"none",
-            background:tab===t?T.border:"transparent", color:tab===t?T.green:T.muted, borderRadius:3, transition:"all .1s", ...M }}>
-            {tab === t && <span style={{ color:T.green+"66" }}>&gt; </span>}{t}
+      <div style={{ display:"flex", gap:2, marginBottom:16, background:T.panel, borderRadius:8, padding:3, border:`1px solid ${T.border}` }}>
+        {["briefing","loops","standup","schedule"].map(t => (
+          <button key={t} onClick={() => setTab(t)} style={{ flex:1, fontSize:12.5, padding:"9px", border:"none",
+            background:tab===t?T.card:"transparent", color:tab===t?T.green:T.muted, borderRadius:6, transition:"all .12s",
+            fontWeight:tab===t?600:400, ...M }}>
+            {t === "loops" ? `loops${sOpen+eOpen ? ` · ${sOpen+eOpen}` : ""}` : t}
           </button>
         ))}
       </div>
@@ -701,7 +719,7 @@ export default function App() {
               {u.slack_url && <SlackLnk url={u.slack_url} />}
             </Blk>
           ))}
-          <div style={{ height:1, background:T.border, margin:"14px 0" }} />
+          <div style={{ height:18 }} />
 
           <Lbl>decisions needed</Lbl>
           {!(briefing?.decisions_needed?.length)
@@ -719,7 +737,7 @@ export default function App() {
                 </Blk>
               ))
           }
-          <div style={{ height:1, background:T.border, margin:"14px 0" }} />
+          <div style={{ height:18 }} />
 
           <Lbl>stakeholder follow-ups</Lbl>
           {(briefing?.stakeholder_followups || []).map((f, i) => (
@@ -736,6 +754,81 @@ export default function App() {
               </div>
             </Blk>
           ))}
+        </div>
+      )}
+
+      {/* ── Open Loops ── */}
+      {tab === "loops" && (
+        <div>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+            <div style={{ fontSize:12, color:T.muted, lineHeight:1.6, ...M }}>
+              Things still on you — auto-detected from what you've replied to. Nothing to tick off.
+            </div>
+            <button onClick={refreshLoops} disabled={loopsBusy} style={{ fontSize:11, padding:"6px 12px",
+              background:"transparent", border:`1px solid ${T.border}`, borderRadius:5, color:T.muted, flexShrink:0, ...M }}>
+              <i className={`ti ti-refresh ${loopsBusy?"spin":""}`} style={{ fontSize:12, verticalAlign:"-2px", marginRight:4 }} />
+              refresh
+            </button>
+          </div>
+
+          {!loops ? <Note>// detecting open loops…</Note> : (sOpen + eOpen === 0) ? (
+            <div style={{ textAlign:"center", padding:"40px 0", color:T.dim }}>
+              <i className="ti ti-circle-check" style={{ fontSize:30, color:T.green, marginBottom:10, display:"block" }} />
+              <div style={{ fontSize:14, color:T.green, ...M }}>All caught up</div>
+              <div style={{ fontSize:12, color:T.dim, marginTop:4, ...M }}>nothing's waiting on a reply from you</div>
+            </div>
+          ) : (
+            <>
+              {/* Slack open loops — primary */}
+              <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
+                <i className="ti ti-brand-slack" style={{ fontSize:14, color:T.slack }} />
+                <span style={{ fontSize:12, fontWeight:700, color:T.slack, letterSpacing:".08em", ...M }}>SLACK · WAITING ON YOU</span>
+                <span style={{ fontSize:11, color:T.dim, ...M }}>{sOpen}</span>
+              </div>
+              {slackOpen.length === 0 ? <Note>// you're clear on Slack</Note> : slackOpen.map((m, i) => (
+                <a key={m.id || i} href={m.slack_url} target="_blank" rel="noopener noreferrer"
+                  style={{ display:"block", textDecoration:"none" }}>
+                  <div style={{ background:T.card, border:`1px solid ${T.border}`, borderLeft:`2px solid ${T.slack}`,
+                    borderRadius:6, padding:"10px 14px", marginBottom:6, transition:"border .12s" }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, marginBottom:4 }}>
+                      <span style={{ fontSize:12, color:T.slack, fontWeight:600, ...M }}>#{m.channel}</span>
+                      <span style={{ fontSize:10, color:m.ageHours>=24?T.red:T.dim, ...M }}>
+                        {m.ageHours>=24 ? `${Math.floor(m.ageHours/24)}d` : `${m.ageHours}h`} ago
+                      </span>
+                    </div>
+                    <div style={{ fontSize:13, color:T.text, lineHeight:1.55, ...M }}>
+                      <span style={{ color:T.muted }}>@{m.user}: </span>
+                      {(m.text || "").replace(/<@[A-Z0-9]+\|([^>]+)>/g, "@$1").replace(/\s+/g," ").slice(0, 160)}
+                    </div>
+                  </div>
+                </a>
+              ))}
+
+              {/* Email open loops — secondary */}
+              <div style={{ display:"flex", alignItems:"center", gap:8, margin:"18px 0 10px" }}>
+                <i className="ti ti-mail" style={{ fontSize:14, color:T.cal }} />
+                <span style={{ fontSize:12, fontWeight:700, color:T.cal, letterSpacing:".08em", ...M }}>EMAIL · WAITING ON YOU</span>
+                <span style={{ fontSize:11, color:T.dim, ...M }}>{eOpen}{loops?.summary?.emailUnread ? ` · ${loops.summary.emailUnread} unread` : ""}</span>
+              </div>
+              {emailOpen.length === 0 ? <Note>// inbox clear</Note> : emailOpen.map((t, i) => (
+                <div key={t.id || i} style={{ background:T.card, border:`1px solid ${T.border}`, borderLeft:`2px solid ${T.cal}`,
+                  borderRadius:6, padding:"10px 14px", marginBottom:6, opacity:t.unread?1:0.7 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, marginBottom:3 }}>
+                    <span style={{ fontSize:13, color:T.bright, fontWeight:t.unread?600:500, ...M }}>
+                      {t.unread && <span style={{ color:T.cal, marginRight:6 }}>●</span>}
+                      {(t.from || "").replace(/<.*>/, "").replace(/"/g,"").trim().slice(0, 34)}
+                    </span>
+                    <span style={{ fontSize:10, color:T.dim, ...M }}>{t.unread ? "unread" : "read"}</span>
+                  </div>
+                  <div style={{ fontSize:12.5, color:T.text, lineHeight:1.5, ...M }}>{(t.subject || "(no subject)").slice(0, 90)}</div>
+                  {t.snippet && <div style={{ fontSize:11, color:T.dim, marginTop:3, lineHeight:1.5, ...M }}>{t.snippet.slice(0, 110)}</div>}
+                </div>
+              ))}
+              {loops?.summary?.emailShown < eOpen && (
+                <Note>// +{eOpen - loops.summary.emailShown} more open in Gmail (showing unread &amp; most recent first)</Note>
+              )}
+            </>
+          )}
         </div>
       )}
 

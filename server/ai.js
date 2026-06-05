@@ -213,7 +213,14 @@ const compactTasks = (tasks = []) =>
   (tasks.map(t => `- [${t.priority || "P3"}] ${clip(t.task, 100)} (${t.status || "Not Started"})`).join("\n")) || "  (none)";
 
 // ── Briefing generator ────────────────────────────────────────
-const generateBriefing = async (gmailData, calendarData, slackData, carryForwardTasks = [], directives = [], learnedTopics = []) => {
+const compactOpenLoops = (loops) => {
+  if (!loops) return "  (not available)";
+  const s = (loops.slackOpen || []).map(m => `- SLACK #${m.channel} · ${m.ageHours}h · @${m.user}: ${clip(m.text, 130)}`).join("\n");
+  const e = (loops.emailOpen || []).map(t => `- EMAIL ${t.unread ? "(unread)" : "(read)"} from ${clip((t.from || "").replace(/<.*>/, ""), 30)}: ${clip(t.subject, 80)}`).join("\n");
+  return `${s || "  (no open Slack tags)"}\n${e || "  (no open emails)"}`;
+};
+
+const generateBriefing = async (gmailData, calendarData, slackData, carryForwardTasks = [], directives = [], learnedTopics = [], openLoops = null) => {
   const tz = context.user.timezone;
   const today = new Date().toLocaleDateString("en-IN", { weekday: "long", day: "2-digit", month: "long", year: "numeric", timeZone: tz });
   const wh = context.user.work_hours || { start: "12:00", end: "21:00" };
@@ -237,13 +244,15 @@ CALENDAR (today's events):
 ${compactCalendar(calendarData)}
 SLACK (messages where he was tagged/asked — may await his reply):
 ${compactSlack(slackData)}
+OPEN LOOPS (auto-detected — tagged/emailed and he has NOT replied yet; these are the highest-signal "still on him" items):
+${compactOpenLoops(openLoops)}
 CARRY-FORWARD (incomplete tasks from yesterday):
 ${compactTasks(carryForwardTasks)}
 
 == HOW TO BUILD EACH SECTION (follow precisely) ==
 1. briefing.critical_updates — 3 to 5 items that genuinely need his attention today. Each: a specific title and a detail of 1-2 full sentences with the real context (who, which program/batch, why it matters, what's at stake). urgency = "high" | "medium" | "low". Draw from email/slack signals AND the standing priorities.
 2. briefing.decisions_needed — decisions only HE can make. Give title, context (the tradeoff / why it's stuck), and "from" (who's asking).
-3. briefing.stakeholder_followups — people waiting on him: person, channel, waiting_since, topic. Include every unanswered Slack tag that needs his reply.
+3. briefing.stakeholder_followups — people waiting on him: person, channel, waiting_since, topic. Build this PRIMARILY from the OPEN LOOPS list (those are confirmed unanswered). Lead with the Slack open loops; include only the emails that genuinely need a personal reply. Drop anything that's just an FYI/notification.
 4. standup.leadership — what he reports UP to Keshav/Aman. yesterday = concrete things shipped; today = what he is personally driving; blockers = what's stuck + who he needs. 3 specific bullets each (not one-liners).
 5. standup.team — yesterday = what his team delivered; today = what they're working on; delegate = specific things to hand to NAMED teammates (e.g., "Rajesh: assign LMS Batch IDs for the 12 cohorts").
 6. action_items — 6 to 9 concrete, actionable tasks from the data, carry-forward and priorities. Each: id (short slug), task (specific), owner ("Me" or a named teammate), due, status ("Not Started"), priority (P1 = critical+today, P2 = important this week, P3 = normal, P4 = low), priority_reason (one line WHY), source ("gmail"|"slack"|"calendar"|"manual"), type ("action"|"decision"|"delegate"|"followup"|"people").
@@ -254,7 +263,7 @@ ${compactTasks(carryForwardTasks)}
    - Open with a planning block at ${wh.start} and close with an EOD wrap-up + next-day prep near ${wh.end}.
    - Cover the WHOLE window with NO large empty gaps. Each block: time ("HH:MM" 24h), block (specific title tied to a real meeting or task), type ("deep_work"|"meeting"|"followup"|"comms"|"buffer"|"strategic"), notes (what to actually do).
 8. summary — focus_of_day (one punchy sentence naming the single most important outcome today), top3 (the three things that MUST happen), risk_flag (biggest risk today, or "").
-9. learn — teach him ONE genuinely useful, NEW thing he can apply at work today. Favour Google Sheets / Excel functions and data tricks first (he already knows SUBTOTAL and TOCOL — build on that level), then Slack power-features, then ops/productivity/automation. category = "sheets" | "slack" | "ops" | "productivity". lesson = 1-2 sentences on what it does and why it's useful. example = a tiny concrete example tied to his ops work (e.g. a real formula). try_this = one specific thing to try today. DO NOT repeat any of these already-taught topics: ${learnedTopics.length ? learnedTopics.join("; ") : "(none yet)"}.
+9. learn — teach him ONE genuinely useful, NEW, often-under-the-radar thing that helps a senior operations leader (~10 yrs experience) grow professionally AND personally. ROTATE widely across domains day to day — do NOT default to spreadsheets every time. category = "sheets" | "product" | "management" | "finance" | "strategy" | "communication" | "automation" | "growth". Pick rare-but-high-leverage over basics. lesson = 1-2 sentences on what it is and why it matters. example = a tiny concrete example tied to HIS ops/leadership world (a formula, a framework applied to a real situation, a number). try_this = one specific thing to try today. DO NOT repeat any of these already-taught topics: ${learnedTopics.length ? learnedTopics.join("; ") : "(none yet)"}.
 
 Return ONLY valid JSON, no markdown fences, exactly this shape:
 {
