@@ -66,6 +66,13 @@ export const disconnect = (provider) =>
 export const sync = () =>
   req("POST", "/api/sync");
 
+// ── Queue / offline-sync status ────────────────────────────────
+export const getStatus = () =>
+  req("GET", "/api/status");
+
+export const getOutboxJob = (id) =>
+  req("GET", `/api/outbox/${id}`);
+
 // ── Memory sheet ───────────────────────────────────────────────
 export const getMemorySheet = () =>
   req("GET", "/api/memory/sheet");

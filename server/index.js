@@ -9,6 +9,7 @@ const express = require("express");
 const cors = require("cors");
 const { chat, generateBriefing } = require("./ai");
 const db = require("./db");
+const queue = require("./queue");
 const google = require("./connectors/google");
 const slack = require("./connectors/slack");
 const rag = require("./rag");
@@ -122,12 +123,9 @@ app.delete("/api/tasks/custom/:id", (req, res) => {
   res.json({ ok: true });
 });
 
-// ── Chat endpoint ──────────────────────────────────────────────
-app.post("/api/chat", async (req, res) => {
-  try {
-    const { messages, briefingContext } = req.body;
-    if (!messages || !Array.isArray(messages)) return res.status(400).json({ error: "messages array required" });
-
+// Build FRIDAY's full context for a chat turn and call the engine. Shared by the
+// live endpoint and the queued-chat job (used when Claude was at its limit).
+const buildAndChat = async (messages, briefingContext) => {
     const recentMemory = db.getRecentMemory(10);
     const patterns = db.getTopPatterns(5);
     const carryForward = db.getCarryForwardTasks();
@@ -163,8 +161,34 @@ CARRY-FORWARD TASKS FROM YESTERDAY:
 ${carryForward.map(t => `- [${t.priority}] ${t.task} (${t.status})`).join("\n") || "None"}
     `.trim();
 
-    const reply = await chat(messages, extraContext);
-    res.json({ reply });
+    return chat(messages, extraContext);
+};
+
+// ── Chat endpoint ──────────────────────────────────────────────
+app.post("/api/chat", async (req, res) => {
+  try {
+    const { messages, briefingContext } = req.body;
+    if (!messages || !Array.isArray(messages)) return res.status(400).json({ error: "messages array required" });
+
+    // If Claude is already known to be at its limit, queue immediately — don't
+    // make the user wait for a call we know will fail.
+    if (queue.isClaudeBlocked()) {
+      const { id } = queue.enqueue("chat", { messages, briefingContext }, { dedupe: false });
+      return res.json({ queued: true, jobId: id, ...queue.status() });
+    }
+
+    try {
+      const reply = await buildAndChat(messages, briefingContext);
+      res.json({ reply });
+    } catch (e) {
+      // Hit the limit / went offline mid-request → park it and let the user know.
+      if (e && (e.isClaudeLimit || e.isOffline)) {
+        if (e.isClaudeLimit) queue.blockClaude(e.resetAt);
+        const { id } = queue.enqueue("chat", { messages, briefingContext }, { dedupe: false });
+        return res.json({ queued: true, jobId: id, ...queue.status() });
+      }
+      throw e;
+    }
   } catch (e) {
     console.error("Chat error:", e);
     res.status(500).json({ error: e.message });
@@ -371,8 +395,6 @@ const inputSignature = (gmail, calendar, slack) => {
   return crypto.createHash("sha256").update(payload).digest("hex");
 };
 
-let genInFlight = false; // only ONE briefing generation at a time
-
 // Pull current inputs from connected sources (+ any injected slack)
 const gatherInputs = async (slackInput = null) => {
   const conns = Object.fromEntries(db.getConnections().map(c => [c.provider, true]));
@@ -386,24 +408,36 @@ const gatherInputs = async (slackInput = null) => {
   return { gmail, calendar, slackMsgs, hasSource: !!(conns.google || conns.slack || injectedSlack) };
 };
 
-// Generate via the configured engine (Claude CLI) and persist
-const generateAndSave = async (gmail, calendar, slackMsgs, sig, date) => {
-  genInFlight = true;
-  try {
-    const carryForward = db.getCarryForwardTasks();
-    const directives = db.getDirectives().map(d => d.text);
-    const briefing = await generateBriefing(gmail, calendar, slackMsgs, carryForward, directives);
-    db.saveBriefing(date, briefing, "sync");
-    db.setSetting("input_signature", sig);
-    if (briefing?.summary?.focus_of_day) logMemory("briefing", `${date}: ${briefing.summary.focus_of_day}`);
-    return briefing;
-  } finally {
-    genInFlight = false;
-  }
+// ── Queue jobs ─────────────────────────────────────────────────
+// The briefing job re-gathers FRESH inputs at run time, so a job parked during a
+// usage-limit window reflects reality when it finally runs (offline-sync style).
+const runBriefingJob = async () => {
+  const { gmail, calendar, slackMsgs, hasSource } = await gatherInputs(null);
+  if (!hasSource) return { ok: false, skipped: "no sources connected" };
+  const date = new Date().toISOString().split("T")[0];
+  const sig = inputSignature(gmail, calendar, slackMsgs);
+  const existing = db.getBriefing(date);
+  if (existing && db.getSetting("input_signature") === sig) return { ok: true, cached: true, date };
+  const carryForward = db.getCarryForwardTasks();
+  const directives = db.getDirectives().map(d => d.text);
+  const briefing = await generateBriefing(gmail, calendar, slackMsgs, carryForward, directives);
+  db.saveBriefing(date, briefing, "sync");
+  db.setSetting("input_signature", sig);
+  if (briefing?.summary?.focus_of_day) logMemory("briefing", `${date}: ${briefing.summary.focus_of_day}`);
+  return { ok: true, date, focus: briefing?.summary?.focus_of_day || null };
 };
 
-// NON-BLOCKING sync: returns immediately. If inputs changed, generation runs in
-// the background (Claude takes a few min) and the UI's poll picks up the result.
+// The chat job runs a turn that was queued because Claude was at its limit.
+const runChatJob = async ({ messages, briefingContext }) => {
+  const reply = await buildAndChat(messages, briefingContext);
+  return { reply };
+};
+
+queue.register({ generate_briefing: runBriefingJob, chat: runChatJob });
+
+// NON-BLOCKING sync: returns immediately. On a cache miss it parks a generation
+// job — the worker runs it now if Claude is free, or after the limit/network
+// recovers. The UI's poll swaps in the new briefing when it lands.
 app.post("/api/sync", async (req, res) => {
   try {
     const force = !!(req.body?.force || req.query.force);
@@ -415,38 +449,86 @@ app.post("/api/sync", async (req, res) => {
     const existing = db.getBriefing(date);
     const counts = { gmail: gmail.length, calendar: calendar.length, slack: slackMsgs.length };
 
-    // CACHE HIT — nothing changed
+    // CACHE HIT — nothing changed, no Claude call (the biggest token saver).
     if (!force && existing && db.getSetting("input_signature") === sig) {
-      return res.json({ ok: true, cached: true, generating: false, briefing: existing, date, counts });
+      return res.json({ ok: true, cached: true, generating: false, briefing: existing, date, counts, ...queue.status() });
     }
-    // Already generating — just acknowledge
-    if (genInFlight) {
-      return res.json({ ok: true, generating: true, briefing: existing || null, date, counts });
-    }
-    // Kick off generation in the background; respond right away
-    generateAndSave(gmail, calendar, slackMsgs, sig, date)
-      .catch(e => console.error("background generation failed:", e.message));
-    res.json({ ok: true, generating: true, briefing: existing || null, date, counts });
+
+    const { id } = queue.enqueue("generate_briefing", { date });
+    const st = queue.status();
+    res.json({
+      ok: true,
+      generating: !st.claudeBlocked && !st.offline,
+      queued: st.claudeBlocked || st.offline,
+      jobId: id, briefing: existing || null, date, counts, ...st,
+    });
   } catch (e) {
     console.error("Sync error:", e);
     res.status(500).json({ error: e.message });
   }
 });
 
-// ── Auto-refresh: every N minutes, check inputs and regenerate ONLY if changed ──
+// Queue / Claude-availability status (drives the UI's "queued / at limit" banner)
+app.get("/api/status", (req, res) => res.json(queue.status()));
+
+// Recent queued jobs (UI shows what's waiting / lets chat pick up its answer)
+app.get("/api/outbox", (req, res) => res.json({ jobs: db.getOutbox(30), ...queue.status() }));
+app.get("/api/outbox/:id", (req, res) => {
+  const job = db.getOutboxJob(Number(req.params.id));
+  if (!job) return res.status(404).json({ error: "not found" });
+  res.json({ job });
+});
+
+// ── Auto-refresh: check inputs every N min, but THROTTLE generation hard so it
+// can't burn your Claude subscription. Generation only happens when: inputs
+// changed AND it's within work hours AND it's been at least MIN_GAP since the last
+// auto-gen AND we're under the daily cap. Manual "sync" bypasses all of this. ──
 const AUTO_REFRESH_MIN = Number(process.env.AUTO_REFRESH_MINUTES || 30);
+const AUTO_MIN_GAP_MIN = Number(process.env.AUTO_MIN_GAP_MINUTES || 90);
+const AUTO_MAX_PER_DAY = Number(process.env.AUTO_MAX_PER_DAY || 8);
+const tz = (require("../src/context.json").user || {}).timezone || "Asia/Kolkata";
+const wh = (require("../src/context.json").user || {}).work_hours || { start: "12:00", end: "21:00" };
+
+// Is "now" inside the configured work-hours window (in the user's timezone)?
+const inWorkHours = () => {
+  const hhmm = new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: tz });
+  return hhmm >= wh.start && hhmm <= wh.end;
+};
+
+// Returns a reason string if we should SKIP auto-generation, else null (=allowed).
+const autoGenSkipReason = () => {
+  if (!inWorkHours()) return "outside work hours";
+  const last = db.getSetting("auto_last_gen");
+  if (last && Date.now() - new Date(last).getTime() < AUTO_MIN_GAP_MIN * 60 * 1000) return "min-gap not elapsed";
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: tz }); // YYYY-MM-DD
+  const count = db.getSetting("auto_gen_day") === today ? Number(db.getSetting("auto_gen_count") || 0) : 0;
+  if (count >= AUTO_MAX_PER_DAY) return `daily cap (${AUTO_MAX_PER_DAY}) reached`;
+  return null;
+};
+
+// Record that an auto-generation was queued (advances the gap clock + daily count).
+const noteAutoGen = () => {
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: tz });
+  const count = db.getSetting("auto_gen_day") === today ? Number(db.getSetting("auto_gen_count") || 0) : 0;
+  db.setSetting("auto_gen_day", today);
+  db.setSetting("auto_gen_count", String(count + 1));
+  db.setSetting("auto_last_gen", new Date().toISOString());
+};
+
 if (AUTO_REFRESH_MIN > 0) {
   setInterval(async () => {
     try {
-      if (!db.getConnection("google") || genInFlight) return;
+      if (!db.getConnection("google")) return;
+      const skip = autoGenSkipReason();
+      if (skip) return; // throttled — don't even fetch/Claude
       const { gmail, calendar, slackMsgs, hasSource } = await gatherInputs(null);
       if (!hasSource) return;
       const date = new Date().toISOString().split("T")[0];
       const sig = inputSignature(gmail, calendar, slackMsgs);
       const existing = db.getBriefing(date);
       if (existing && db.getSetting("input_signature") === sig) return; // unchanged
-      console.log("🔄 auto-refresh: inputs changed → regenerating briefing");
-      await generateAndSave(gmail, calendar, slackMsgs, sig, date);
+      const { deduped } = queue.enqueue("generate_briefing", { date });
+      if (!deduped) { noteAutoGen(); console.log("🔄 auto-refresh: inputs changed → queued briefing"); }
     } catch (e) {
       console.warn("auto-refresh failed:", e.message);
     }
@@ -456,7 +538,10 @@ if (AUTO_REFRESH_MIN > 0) {
 const server = app.listen(PORT, () => {
   console.log(`\n🧠 FRIDAY server running on http://localhost:${PORT}`);
   console.log(`   AI Provider: ${process.env.AI_PROVIDER || "openai"}`);
-  console.log(`   Model: ${process.env.CLAUDE_CLI_MODEL || process.env.OPENAI_MODEL || "default"}\n`);
+  console.log(`   Model: ${process.env.CLAUDE_CLI_MODEL || process.env.OPENAI_MODEL || "default"}`);
+  const st = queue.status();
+  console.log(`   Queue: ${st.pending} pending${st.claudeBlocked ? ` · Claude paused until ${st.blockedUntil}` : ""}\n`);
+  queue.start(); // drain any parked jobs + run the retry loop
 });
 // Briefing generation via Claude can take a while — don't let the socket time out.
 server.timeout = 0;

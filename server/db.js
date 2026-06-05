@@ -76,6 +76,18 @@ db.exec(`
     created_at TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS outbox (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    result TEXT,
+    error TEXT,
+    attempts INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS memory_vectors (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source TEXT NOT NULL,
@@ -259,6 +271,53 @@ const getDirectives = () =>
 const deleteDirective = (id) =>
   db.prepare("DELETE FROM directives WHERE id = ?").run(id);
 
+// ── Outbox (offline / rate-limit queue) ────────────────────────
+// Any FRIDAY action that needs Claude gets parked here when Claude is at its
+// usage limit or the machine is offline, then drained automatically on recovery.
+const enqueueOutbox = (kind, payload) => {
+  const now = new Date().toISOString();
+  const info = db.prepare("INSERT INTO outbox (kind, payload, status, created_at, updated_at) VALUES (?, ?, 'pending', ?, ?)")
+    .run(kind, JSON.stringify(payload || {}), now, now);
+  return info.lastInsertRowid;
+};
+
+// Oldest still-pending job (FIFO).
+const nextPendingOutbox = () => {
+  const row = db.prepare("SELECT * FROM outbox WHERE status = 'pending' ORDER BY id ASC LIMIT 1").get();
+  return row ? { ...row, payload: JSON.parse(row.payload) } : null;
+};
+
+// Is there already a pending job of this kind? (dedupe — e.g. don't queue 5 syncs)
+const hasPendingOutbox = (kind) =>
+  !!db.prepare("SELECT 1 FROM outbox WHERE status = 'pending' AND kind = ?").get(kind);
+
+const countPendingOutbox = () =>
+  db.prepare("SELECT COUNT(*) n FROM outbox WHERE status = 'pending'").get().n;
+
+const markOutboxDone = (id, result) =>
+  db.prepare("UPDATE outbox SET status = 'done', result = ?, error = NULL, updated_at = ? WHERE id = ?")
+    .run(result == null ? null : JSON.stringify(result), new Date().toISOString(), id);
+
+const markOutboxFailed = (id, error) =>
+  db.prepare("UPDATE outbox SET status = 'failed', error = ?, updated_at = ? WHERE id = ?")
+    .run(String(error || "").slice(0, 500), new Date().toISOString(), id);
+
+// Keep a job pending but record the attempt + last error (used for retryable failures).
+const bumpOutboxAttempt = (id, error) =>
+  db.prepare("UPDATE outbox SET attempts = attempts + 1, error = ?, updated_at = ? WHERE id = ?")
+    .run(String(error || "").slice(0, 500), new Date().toISOString(), id);
+
+const getOutboxJob = (id) => {
+  const row = db.prepare("SELECT * FROM outbox WHERE id = ?").get(id);
+  if (!row) return null;
+  return { ...row, payload: JSON.parse(row.payload), result: row.result ? JSON.parse(row.result) : null };
+};
+
+// Recent jobs for the UI (pending first, then most recent).
+const getOutbox = (limit = 30) =>
+  db.prepare("SELECT id, kind, status, error, attempts, created_at, updated_at FROM outbox ORDER BY (status='pending') DESC, id DESC LIMIT ?")
+    .all(limit);
+
 // ── Memory vectors (semantic memory / RAG) ─────────────────────
 const hasVector = (source, extId) =>
   !!db.prepare("SELECT 1 FROM memory_vectors WHERE source = ? AND ext_id = ?").get(source, extId);
@@ -300,4 +359,6 @@ module.exports = {
   getSetting, setSetting,
   addDirective, getDirectives, deleteDirective,
   hasVector, addVector, allVectors, countVectors, sampleVectorText,
+  enqueueOutbox, nextPendingOutbox, hasPendingOutbox, countPendingOutbox,
+  markOutboxDone, markOutboxFailed, bumpOutboxAttempt, getOutboxJob, getOutbox,
 };

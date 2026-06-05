@@ -206,6 +206,7 @@ export default function App() {
   const [chatLoad, setChatLoad] = useState(false);
   const [slashRes, setSlashRes] = useState([]);
   const [conns,    setConns]    = useState([]);
+  const [status,   setStatus]   = useState(null);
   const [banner,   setBanner]   = useState(null);
   const [sheetUrl, setSheetUrl] = useState(null);
   const [memStats, setMemStats] = useState(null);
@@ -242,6 +243,7 @@ export default function App() {
     try { const m = await api.getMemoryStats(); setMemStats(m); } catch {}
     try { const p = await api.getProfile(); setProfile(p.profile || null); } catch {}
     try { const dr = await api.getDirectives(); setDirectives(dr.directives || []); } catch {}
+    try { const st = await api.getStatus(); setStatus(st); } catch {}
   };
 
   const addDirective = async () => {
@@ -269,6 +271,11 @@ export default function App() {
 
   const anyConnected = conns.some(c => c.connected);
 
+  // " (resets ~3:40 PM)" — friendly reset time for the usage-limit messaging
+  const fmtReset = (iso) => iso
+    ? ` (resets ~${new Date(iso).toLocaleTimeString("en-IN", { hour:"2-digit", minute:"2-digit" })})`
+    : "";
+
   const doConnect    = (provider) => {
     const c = conns.find(x => x.provider === provider);
     if (c && !c.configured) {
@@ -288,13 +295,17 @@ export default function App() {
     setSyncing(true);
     try {
       const r = await api.sync();
-      if (r.generating) {
+      if (r.cached) {
+        if (r.briefing) setData(r.briefing);
+        setBanner({ kind:"ok", text:"up to date — nothing changed since the last briefing." });
+      } else if (r.queued) {
+        // Claude is at its limit / offline — the job is parked and will run on recovery.
+        setStatus(r);
+        setBanner({ kind:"ok", text:`Claude is at its usage limit${fmtReset(r.blockedUntil)} — your briefing is queued and will refresh automatically once it resets.` });
+      } else if (r.generating) {
         // Generation runs in the background (Claude takes a few min); the 30s poll
         // will swap in the new briefing automatically when it's ready.
         setBanner({ kind:"ok", text:"FRIDAY is rewriting your briefing with Claude — takes a couple of minutes, it'll update on its own." });
-      } else if (r.cached) {
-        if (r.briefing) setData(r.briefing);
-        setBanner({ kind:"ok", text:"up to date — nothing changed since the last briefing." });
       }
     } catch (e) {
       setBanner({ kind:"err", text:"sync failed — " + (e.message || "error").slice(0, 80) });
@@ -303,9 +314,10 @@ export default function App() {
     setTimeout(() => setBanner(null), 9000);
   };
 
-  // Poll for new briefings every 30s
+  // Poll for new briefings every 30s (and refresh queue/limit status)
   useEffect(() => {
     const poll = setInterval(async () => {
+      try { const st = await api.getStatus(); setStatus(st); } catch {}
       try {
         const res = await api.getBriefing();
         if (res.briefing) {
@@ -396,11 +408,39 @@ export default function App() {
         h.map(m => ({ role: m.role, content: m.content })),
         data
       );
-      setChatHist(prev => [...prev, { role: "assistant", content: res.reply }]);
+      if (res.queued) {
+        // Claude is at its limit — park the question and resolve it when it's answered.
+        setStatus(res);
+        setChatHist(prev => [...prev, { role:"assistant", jobId:res.jobId, pending:true,
+          content:`⏳ Claude is at its usage limit${fmtReset(res.blockedUntil)}. I've queued this — it'll answer here automatically once the limit resets.` }]);
+        pollChatJob(res.jobId);
+      } else {
+        setChatHist(prev => [...prev, { role: "assistant", content: res.reply }]);
+      }
     } catch {
       setChatHist(prev => [...prev, { role: "assistant", content: "error: server unreachable." }]);
     }
     setChatLoad(false);
+  };
+
+  // A queued chat answer arrives later — poll the outbox job and swap it in.
+  const pollChatJob = (jobId) => {
+    const iv = setInterval(async () => {
+      try {
+        const { job } = await api.getOutboxJob(jobId);
+        if (!job) return;
+        if (job.status === "done") {
+          clearInterval(iv);
+          setChatHist(prev => prev.map(m => m.jobId === jobId
+            ? { role:"assistant", content: job.result?.reply || "(no answer)" } : m));
+        } else if (job.status === "failed") {
+          clearInterval(iv);
+          setChatHist(prev => prev.map(m => m.jobId === jobId
+            ? { role:"assistant", content: "couldn't complete this — " + (job.error || "error") } : m));
+        }
+      } catch {}
+    }, 15000);
+    setTimeout(() => clearInterval(iv), 30 * 60 * 1000); // safety stop
   };
 
   if (loading) return (
@@ -578,6 +618,22 @@ export default function App() {
         <div style={{ fontSize:12, marginBottom:12, padding:"8px 12px", borderRadius:5,
           color:banner.kind==="ok"?T.green:T.red, background:(banner.kind==="ok"?T.green:T.red)+"14",
           border:`1px solid ${(banner.kind==="ok"?T.green:T.red)}44`, ...M }}>{banner.text}</div>
+      )}
+
+      {/* Offline-sync / usage-limit strip — only shows when something is parked */}
+      {status && (status.claudeBlocked || status.offline || status.pending > 0) && (
+        <div style={{ fontSize:12, marginBottom:12, padding:"8px 12px", borderRadius:5,
+          color:T.amber, background:T.amberD, border:`1px solid ${T.amber}44`,
+          display:"flex", alignItems:"center", gap:8, ...M }}>
+          <i className={`ti ${status.offline ? "ti-wifi-off" : "ti-clock-pause"}`} style={{ fontSize:14 }} />
+          <span style={{ flex:1 }}>
+            {status.offline
+              ? "Offline — work is queued and will sync automatically when you're back online."
+              : status.claudeBlocked
+                ? `Claude is at its usage limit${fmtReset(status.blockedUntil)} — ${status.pending} item${status.pending===1?"":"s"} queued, will sync in once it resets.`
+                : `${status.pending} item${status.pending===1?"":"s"} in the sync pipeline…`}
+          </span>
+        </div>
       )}
 
       <ConnectBar conns={conns} onConnect={doConnect} onDisconnect={doDisconnect} />

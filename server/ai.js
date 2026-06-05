@@ -13,6 +13,32 @@ const context = require("../src/context.json");
 
 const PROVIDER = process.env.AI_PROVIDER || "openai";
 
+// ── Typed errors so the queue can tell "retry later" from "real failure" ──
+// Claude subscription usage limit hit — retry once it resets (resetAt, if known).
+class ClaudeLimitError extends Error {
+  constructor(message, resetAt = null) { super(message); this.name = "ClaudeLimitError"; this.isClaudeLimit = true; this.resetAt = resetAt; }
+}
+// No network / Claude unreachable — retry when back online.
+class OfflineError extends Error {
+  constructor(message) { super(message); this.name = "OfflineError"; this.isOffline = true; }
+}
+
+// Classify raw CLI/stderr text into a typed, retryable error (or null if not one).
+const classifyClaudeError = (text = "") => {
+  const t = text.toLowerCase();
+  if (/usage limit|rate limit|too many requests|quota|429|limit reached|reached your|out of (credits|usage)/.test(t)) {
+    // Try to recover a reset time if Claude mentioned one (epoch seconds/ms).
+    let resetAt = null;
+    const epoch = t.match(/reset[^0-9]{0,12}(\d{10,13})/);
+    if (epoch) { const n = Number(epoch[1]); resetAt = new Date(epoch[1].length > 10 ? n : n * 1000).toISOString(); }
+    return new ClaudeLimitError("Claude usage limit reached" + (resetAt ? ` (resets ${resetAt})` : ""), resetAt);
+  }
+  if (/enotfound|eai_again|econnrefused|etimedout|network|offline|getaddrinfo|connect timeout|unable to connect|\bdns\b/.test(t)) {
+    return new OfflineError("Claude/network unreachable");
+  }
+  return null;
+};
+
 // ── OpenAI ────────────────────────────────────────────────────
 const getOpenAIResponse = async (messages, systemPrompt, maxTokens = 2000) => {
   const OpenAI = require("openai");
@@ -56,15 +82,26 @@ const getClaudeCliResponse = (messages, systemPrompt) =>
     delete childEnv.ANTHROPIC_AUTH_TOKEN;
 
     // Run in a neutral dir so it doesn't load FRIDAY's project context/CLAUDE.md.
-    const child = spawn(bin, args, { env: childEnv, cwd: require("os").tmpdir() });
+    let child;
+    try {
+      child = spawn(bin, args, { env: childEnv, cwd: require("os").tmpdir() });
+    } catch (e) { return reject(new OfflineError("claude cli not runnable: " + e.message)); }
     let out = "", err = "";
-    const timer = setTimeout(() => { child.kill("SIGKILL"); reject(new Error("claude cli timed out")); }, 420000);
+    const timer = setTimeout(() => { child.kill("SIGKILL"); reject(new OfflineError("claude cli timed out")); }, 420000);
     child.stdout.on("data", d => (out += d));
     child.stderr.on("data", d => (err += d));
-    child.on("error", e => { clearTimeout(timer); reject(new Error("claude cli not runnable: " + e.message)); });
+    child.on("error", e => { clearTimeout(timer); reject(new OfflineError("claude cli not runnable: " + e.message)); });
     child.on("close", code => {
       clearTimeout(timer);
-      if (code !== 0) return reject(new Error(`claude cli exited ${code}: ${(err || out || "no output").slice(0, 400)}`));
+      if (code !== 0) {
+        const blob = `${err}\n${out}`;
+        const typed = classifyClaudeError(blob);
+        if (typed) return reject(typed);
+        return reject(new Error(`claude cli exited ${code}: ${(err || out || "no output").slice(0, 400)}`));
+      }
+      // Some limit conditions come back on stdout with exit 0 — catch those too.
+      const typed = classifyClaudeError(out);
+      if (typed && typed.isClaudeLimit && out.trim().length < 400) return reject(typed);
       resolve(out.trim());
     });
 
@@ -127,6 +164,30 @@ RESPONSE RULES:
 - Use priority levels: P1 (critical today), P2 (important this week), P3 (normal), P4 (low)`;
 };
 
+// ── Token optimization ────────────────────────────────────────
+// The raw connector payloads are dumped into the prompt verbatim today. Re-encoding
+// them as terse lines (no repeated JSON keys/braces/quotes) and capping count +
+// length cuts the input tokens roughly in half with no loss of useful signal.
+const clip = (s, n) => { s = String(s || "").replace(/\s+/g, " ").trim(); return s.length > n ? s.slice(0, n) + "…" : s; };
+
+const compactGmail = (mail = [], max = 30) =>
+  (mail.slice(0, max).map(m =>
+    `- ${clip(m.from, 50)} | ${clip(m.subject, 90)} | ${clip(m.snippet, 140)}`
+  ).join("\n")) + (mail.length > max ? `\n  (+${mail.length - max} more)` : "") || "  (none)";
+
+const compactCalendar = (cal = []) =>
+  (cal.map(e =>
+    `- ${clip(e.start, 16)} ${clip(e.title, 70)}${(e.attendees || []).length ? ` (${(e.attendees || []).slice(0, 4).map(a => String(a).split("@")[0]).join(", ")}${e.attendees.length > 4 ? "…" : ""})` : ""}`
+  ).join("\n")) || "  (none)";
+
+const compactSlack = (slack = [], max = 25) =>
+  (slack.slice(0, max).map(m =>
+    `- #${clip(m.channel, 30)} @${clip(m.user, 24)}: ${clip(m.text, 160)}`
+  ).join("\n")) + (slack.length > max ? `\n  (+${slack.length - max} more)` : "") || "  (none)";
+
+const compactTasks = (tasks = []) =>
+  (tasks.map(t => `- [${t.priority || "P3"}] ${clip(t.task, 100)} (${t.status || "Not Started"})`).join("\n")) || "  (none)";
+
 // ── Briefing generator ────────────────────────────────────────
 const generateBriefing = async (gmailData, calendarData, slackData, carryForwardTasks = [], directives = []) => {
   const tz = context.user.timezone;
@@ -144,10 +205,14 @@ THINK LIKE A CHIEF OF STAFF, NOT A LIST-MAKER. Your single most valuable job is 
 
 ${directives.length ? `== STANDING PRIORITIES (weight heavily across the whole briefing) ==\n${directives.map((d, i) => `${i + 1}. ${d}`).join("\n")}\n` : ""}
 == INPUT DATA ==
-GMAIL (received + sent): ${JSON.stringify(gmailData)}
-CALENDAR (today's events): ${JSON.stringify(calendarData)}
-SLACK (messages where he was tagged/asked — may await his reply): ${JSON.stringify(slackData)}
-CARRY-FORWARD (incomplete tasks from yesterday): ${JSON.stringify(carryForwardTasks)}
+GMAIL (received + sent):
+${compactGmail(gmailData)}
+CALENDAR (today's events):
+${compactCalendar(calendarData)}
+SLACK (messages where he was tagged/asked — may await his reply):
+${compactSlack(slackData)}
+CARRY-FORWARD (incomplete tasks from yesterday):
+${compactTasks(carryForwardTasks)}
 
 == HOW TO BUILD EACH SECTION (follow precisely) ==
 1. briefing.critical_updates — 3 to 5 items that genuinely need his attention today. Each: a specific title and a detail of 1-2 full sentences with the real context (who, which program/batch, why it matters, what's at stake). urgency = "high" | "medium" | "low". Draw from email/slack signals AND the standing priorities.
@@ -182,4 +247,4 @@ Return ONLY valid JSON, no markdown fences, exactly this shape:
   return JSON.parse(jsonStr);
 };
 
-module.exports = { chat, generateBriefing, buildSystemPrompt };
+module.exports = { chat, generateBriefing, buildSystemPrompt, ClaudeLimitError, OfflineError, classifyClaudeError };
