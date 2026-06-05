@@ -486,7 +486,7 @@ export default function App() {
     </div>
   );
 
-  const { briefing, standup, schedule, summary } = data || {};
+  const { briefing, standup, schedule, summary, learn } = data || {};
   const taskList = allTasks();
   const rawTasks = data?.action_items || [];
   const p1    = rawTasks.map(t => ({ ...t, status: ov[t.id] || t.status })).filter(t => t.priority === "P1" && t.status !== "Completed").length;
@@ -667,6 +667,28 @@ export default function App() {
       {/* ── Briefing ── */}
       {tab === "briefing" && (
         <div>
+          {learn && learn.title && (
+            <div style={{ background:`linear-gradient(135deg, ${T.purpleD}, ${T.cyanD})`,
+              border:`1px solid ${T.purple}44`, borderLeft:`2px solid ${T.purple}`, borderRadius:6,
+              padding:"12px 16px", marginBottom:14 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:7 }}>
+                <i className="ti ti-bulb" style={{ fontSize:14, color:T.purple }} />
+                <span style={{ fontSize:11, fontWeight:700, color:T.purple, letterSpacing:".12em", ...M }}>LEARN TODAY</span>
+                {learn.category && <Tag color={T.cyan}>{learn.category}</Tag>}
+              </div>
+              <div style={{ fontSize:14, fontWeight:600, color:T.bright, marginBottom:5 }}>{learn.title}</div>
+              <div style={{ fontSize:13, color:T.text, lineHeight:1.65, marginBottom:learn.example?7:0 }}>{learn.lesson}</div>
+              {learn.example && (
+                <div style={{ fontSize:12, color:T.cyan, background:T.bg, border:`1px solid ${T.border}`,
+                  borderRadius:4, padding:"7px 10px", margin:"2px 0 7px", whiteSpace:"pre-wrap", ...M }}>{learn.example}</div>
+              )}
+              {learn.try_this && (
+                <div style={{ fontSize:12, color:T.muted, lineHeight:1.6 }}>
+                  <span style={{ color:T.green, fontWeight:700 }}>try today → </span>{learn.try_this}
+                </div>
+              )}
+            </div>
+          )}
           <Lbl>critical updates</Lbl>
           {(briefing?.critical_updates || []).map((u, i) => (
             <Blk key={i} accent={urgC[u.urgency || "medium"]}>

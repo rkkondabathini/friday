@@ -428,7 +428,21 @@ const runBriefingJob = async () => {
   if (existing && db.getSetting("input_signature") === sig) return { ok: true, cached: true, date };
   const carryForward = db.getCarryForwardTasks();
   const directives = db.getDirectives().map(d => d.text);
-  const briefing = await generateBriefing(gmail, calendar, slackMsgs, carryForward, directives);
+  const learnedTopics = JSON.parse(db.getSetting("learned_topics") || "[]");
+  const briefing = await generateBriefing(gmail, calendar, slackMsgs, carryForward, directives, learnedTopics);
+
+  // Daily lesson: keep ONE per day stable across regenerations, and remember it so
+  // we never repeat a topic. (Costs no extra Claude calls — it's part of the briefing.)
+  const today = todayInTz();
+  if (db.getSetting("lesson_day") === today && db.getSetting("lesson_json")) {
+    briefing.learn = JSON.parse(db.getSetting("lesson_json")); // reuse today's lesson
+  } else if (briefing.learn && briefing.learn.title) {
+    db.setSetting("lesson_day", today);
+    db.setSetting("lesson_json", JSON.stringify(briefing.learn));
+    db.setSetting("learned_topics", JSON.stringify([...learnedTopics, briefing.learn.title].slice(-40)));
+    logMemory("learning", `Taught: ${briefing.learn.title} (${briefing.learn.category})`);
+  }
+
   db.saveBriefing(date, briefing, "sync");
   db.setSetting("input_signature", sig);
   if (briefing?.summary?.focus_of_day) logMemory("briefing", `${date}: ${briefing.summary.focus_of_day}`);
@@ -482,7 +496,8 @@ app.get("/api/status", (req, res) => res.json(queue.status()));
 // Today's real Claude usage — tokens, cost, calls, auto-gen count + the daily cap.
 app.get("/api/usage", (req, res) => {
   const u = db.getUsage(todayInTz());
-  res.json({ ...u, autoCap: Number(process.env.AUTO_MAX_PER_DAY || 8) });
+  const cap = (process.env.AUTO_TIMES || "12:00,16:00,20:00").split(",").filter(Boolean).length;
+  res.json({ ...u, autoCap: cap });
 });
 
 // Recent queued jobs (UI shows what's waiting / lets chat pick up its answer)
@@ -493,58 +508,56 @@ app.get("/api/outbox/:id", (req, res) => {
   res.json({ job });
 });
 
-// ── Auto-refresh: check inputs every N min, but THROTTLE generation hard so it
-// can't burn your Claude subscription. Generation only happens when: inputs
-// changed AND it's within work hours AND it's been at least MIN_GAP since the last
-// auto-gen AND we're under the daily cap. Manual "sync" bypasses all of this. ──
-const AUTO_REFRESH_MIN = Number(process.env.AUTO_REFRESH_MINUTES || 30);
-const AUTO_MIN_GAP_MIN = Number(process.env.AUTO_MIN_GAP_MINUTES || 90);
-const AUTO_MAX_PER_DAY = Number(process.env.AUTO_MAX_PER_DAY || 8);
-const tz = (require("../src/context.json").user || {}).timezone || "Asia/Kolkata";
-const wh = (require("../src/context.json").user || {}).work_hours || { start: "12:00", end: "21:00" };
+// ── Scheduled briefings: regenerate at a few FIXED times a day (not hourly), so
+// FRIDAY sips your Claude subscription — leaving you headroom for everything else.
+// At each slot it only spends a Claude call if inputs actually changed. Manual
+// "sync" in the UI always works and bypasses this schedule. ──
+const AUTO_REFRESH_MIN = Number(process.env.AUTO_REFRESH_MINUTES || 20); // how often to CHECK the clock
+const AUTO_TIMES = (process.env.AUTO_TIMES || "12:00,16:00,20:00")
+  .split(",").map(s => s.trim()).filter(Boolean).sort();
 
-// Is "now" inside the configured work-hours window (in the user's timezone)?
-const inWorkHours = () => {
-  const hhmm = new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: tz });
-  return hhmm >= wh.start && hhmm <= wh.end;
+const nowHHMM = () => new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: USER_TZ });
+const slotsDoneToday = () =>
+  db.getSetting("auto_slots_day") === todayInTz() ? (db.getSetting("auto_slots_done") || "").split(",").filter(Boolean) : [];
+
+// The latest scheduled slot that has already passed today but hasn't been handled.
+const dueSlot = () => {
+  const t = nowHHMM(), done = slotsDoneToday();
+  const passed = AUTO_TIMES.filter(s => t >= s && !done.includes(s));
+  return passed.length ? passed[passed.length - 1] : null;
 };
-
-// Returns a reason string if we should SKIP auto-generation, else null (=allowed).
-const autoGenSkipReason = () => {
-  if (!inWorkHours()) return "outside work hours";
-  const last = db.getSetting("auto_last_gen");
-  if (last && Date.now() - new Date(last).getTime() < AUTO_MIN_GAP_MIN * 60 * 1000) return "min-gap not elapsed";
-  const today = new Date().toLocaleDateString("en-CA", { timeZone: tz }); // YYYY-MM-DD
-  const count = db.getSetting("auto_gen_day") === today ? Number(db.getSetting("auto_gen_count") || 0) : 0;
-  if (count >= AUTO_MAX_PER_DAY) return `daily cap (${AUTO_MAX_PER_DAY}) reached`;
-  return null;
+const markSlotDone = (slot) => {
+  const done = new Set([...slotsDoneToday(), slot]);
+  db.setSetting("auto_slots_day", todayInTz());
+  db.setSetting("auto_slots_done", [...done].join(","));
 };
-
-// Record that an auto-generation was queued (advances the gap clock + daily count).
 const noteAutoGen = () => {
-  const today = new Date().toLocaleDateString("en-CA", { timeZone: tz });
+  const today = todayInTz();
   const count = db.getSetting("auto_gen_day") === today ? Number(db.getSetting("auto_gen_count") || 0) : 0;
   db.setSetting("auto_gen_day", today);
   db.setSetting("auto_gen_count", String(count + 1));
-  db.setSetting("auto_last_gen", new Date().toISOString());
 };
 
-if (AUTO_REFRESH_MIN > 0) {
+if (AUTO_REFRESH_MIN > 0 && AUTO_TIMES.length) {
   setInterval(async () => {
     try {
       if (!db.getConnection("google")) return;
-      const skip = autoGenSkipReason();
-      if (skip) return; // throttled — don't even fetch/Claude
+      const slot = dueSlot();
+      if (!slot) return; // not at a scheduled time, or already handled
       const { gmail, calendar, slackMsgs, hasSource } = await gatherInputs(null);
-      if (!hasSource) return;
+      if (!hasSource) return; // sources not ready — retry next tick (don't burn the slot)
+      markSlotDone(slot);     // this slot is now handled for today
       const date = new Date().toISOString().split("T")[0];
       const sig = inputSignature(gmail, calendar, slackMsgs);
       const existing = db.getBriefing(date);
-      if (existing && db.getSetting("input_signature") === sig) return; // unchanged
+      if (existing && db.getSetting("input_signature") === sig) {
+        console.log(`⏰ ${slot} slot: inputs unchanged → no Claude call`);
+        return;
+      }
       const { deduped } = queue.enqueue("generate_briefing", { date });
-      if (!deduped) { noteAutoGen(); console.log("🔄 auto-refresh: inputs changed → queued briefing"); }
+      if (!deduped) { noteAutoGen(); console.log(`⏰ ${slot} slot: changes detected → queued briefing`); }
     } catch (e) {
-      console.warn("auto-refresh failed:", e.message);
+      console.warn("scheduled briefing failed:", e.message);
     }
   }, AUTO_REFRESH_MIN * 60 * 1000);
 }

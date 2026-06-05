@@ -213,7 +213,7 @@ const compactTasks = (tasks = []) =>
   (tasks.map(t => `- [${t.priority || "P3"}] ${clip(t.task, 100)} (${t.status || "Not Started"})`).join("\n")) || "  (none)";
 
 // ── Briefing generator ────────────────────────────────────────
-const generateBriefing = async (gmailData, calendarData, slackData, carryForwardTasks = [], directives = []) => {
+const generateBriefing = async (gmailData, calendarData, slackData, carryForwardTasks = [], directives = [], learnedTopics = []) => {
   const tz = context.user.timezone;
   const today = new Date().toLocaleDateString("en-IN", { weekday: "long", day: "2-digit", month: "long", year: "numeric", timeZone: tz });
   const wh = context.user.work_hours || { start: "12:00", end: "21:00" };
@@ -226,6 +226,8 @@ const generateBriefing = async (gmailData, calendarData, slackData, carryForward
 Be SPECIFIC, DETAILED and EXECUTIVE-GRADE. Use the real names, programs, batch IDs and concrete next steps found in the data — never write generic filler. Every line should read like it was written by a sharp chief of staff who knows his world inside out.
 
 THINK LIKE A CHIEF OF STAFF, NOT A LIST-MAKER. Your single most valuable job is to surface what is EASY TO MISS — the quiet risks, the things slipping through the cracks, the second-order consequences, the small-looking items that will blow up if ignored, the threads that have gone silent. Read between the lines and CONNECT THE DOTS ACROSS SOURCES: e.g., a refund request + a consumer-court mention + a leadership "hold" together = a LEGAL ESCALATION, not three separate notes; a batch missing its LMS Batch ID + an upcoming session for that batch = an imminent student-impact incident. Prioritise what is IMPORTANT BUT QUIET over what is merely loud. For EACH standing priority, proactively ask "is anything about this being neglected right now?" and if so, surface it — even if the data only hints at it. The user should read this and think "I would have missed that."
+
+CHANNEL WEIGHTING (important): His real work happens on SLACK and IN-PERSON. Treat SLACK mentions, threads and unanswered tags as the PRIMARY, highest-signal source — lead the briefing, standup and action items with them. EMAIL is mainly an official record and EXTERNAL channel; treat it as lower-signal and only elevate an email if it is an external escalation, a formal/legal notice, or an official decision needing his sign-off. Do not pad the briefing with routine email noise.
 
 ${directives.length ? `== STANDING PRIORITIES (weight heavily across the whole briefing) ==\n${directives.map((d, i) => `${i + 1}. ${d}`).join("\n")}\n` : ""}
 == INPUT DATA ==
@@ -252,6 +254,7 @@ ${compactTasks(carryForwardTasks)}
    - Open with a planning block at ${wh.start} and close with an EOD wrap-up + next-day prep near ${wh.end}.
    - Cover the WHOLE window with NO large empty gaps. Each block: time ("HH:MM" 24h), block (specific title tied to a real meeting or task), type ("deep_work"|"meeting"|"followup"|"comms"|"buffer"|"strategic"), notes (what to actually do).
 8. summary — focus_of_day (one punchy sentence naming the single most important outcome today), top3 (the three things that MUST happen), risk_flag (biggest risk today, or "").
+9. learn — teach him ONE genuinely useful, NEW thing he can apply at work today. Favour Google Sheets / Excel functions and data tricks first (he already knows SUBTOTAL and TOCOL — build on that level), then Slack power-features, then ops/productivity/automation. category = "sheets" | "slack" | "ops" | "productivity". lesson = 1-2 sentences on what it does and why it's useful. example = a tiny concrete example tied to his ops work (e.g. a real formula). try_this = one specific thing to try today. DO NOT repeat any of these already-taught topics: ${learnedTopics.length ? learnedTopics.join("; ") : "(none yet)"}.
 
 Return ONLY valid JSON, no markdown fences, exactly this shape:
 {
@@ -259,7 +262,8 @@ Return ONLY valid JSON, no markdown fences, exactly this shape:
   "standup": { "leadership": {"yesterday":[],"today":[],"blockers":[]}, "team": {"yesterday":[],"today":[],"delegate":[]} },
   "action_items": [{"id","task","owner","due","status","priority","priority_reason","source","type"}],
   "schedule": [{"time","block","type","notes"}],
-  "summary": {"focus_of_day","top3":[],"risk_flag"}
+  "summary": {"focus_of_day","top3":[],"risk_flag"},
+  "learn": {"title","category","lesson","example","try_this"}
 }`;
 
   const raw = await chat([{ role: "user", content: prompt }], "", 6000);
