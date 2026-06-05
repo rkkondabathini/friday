@@ -435,14 +435,16 @@ const gatherOpenLoops = async (force = false) => {
     .slice(0, 12);
   const slackOpen = slackTags.filter(m => !m.replied);
   const emailOpenTotal = email.filter(t => !t.lastFromMe).length;
+  const manual = db.getManualLoops(false); // open in-person/ad-hoc items
   const data = {
     slack: slackTags, email,
-    slackOpen, emailOpen,
+    slackOpen, emailOpen, manual,
     summary: {
       slackOpen: slackOpen.length, slackClosed: slackTags.length - slackOpen.length,
       emailOpen: emailOpenTotal, emailClosed: email.length - emailOpenTotal,
       emailUnread: email.filter(t => !t.lastFromMe && t.unread).length,
       emailShown: emailOpen.length,
+      manual: manual.length,
     },
     at: new Date().toISOString(),
   };
@@ -553,6 +555,26 @@ app.get("/api/openloops", async (req, res) => {
     console.error("openloops error:", e.message);
     res.status(500).json({ error: e.message });
   }
+});
+
+// Manual loops — quick capture of things on you with no digital trace (in-person, calls)
+app.post("/api/loops/manual", (req, res) => {
+  const text = (req.body?.text || "").trim();
+  if (!text) return res.status(400).json({ error: "text required" });
+  const id = db.addManualLoop(text);
+  _openLoopsCache.at = 0; // reflect immediately
+  logMemory("manual_loop", `Captured: ${text}`);
+  res.json({ ok: true, id, manual: db.getManualLoops(false) });
+});
+app.post("/api/loops/manual/:id/done", (req, res) => {
+  db.closeManualLoop(Number(req.params.id));
+  _openLoopsCache.at = 0;
+  res.json({ ok: true, manual: db.getManualLoops(false) });
+});
+app.delete("/api/loops/manual/:id", (req, res) => {
+  db.deleteManualLoop(Number(req.params.id));
+  _openLoopsCache.at = 0;
+  res.json({ ok: true, manual: db.getManualLoops(false) });
 });
 
 // Recent queued jobs (UI shows what's waiting / lets chat pick up its answer)

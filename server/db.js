@@ -76,6 +76,13 @@ db.exec(`
     created_at TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS manual_loops (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    text TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    done_at TEXT
+  );
+
   CREATE TABLE IF NOT EXISTS outbox (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     kind TEXT NOT NULL,
@@ -271,6 +278,21 @@ const getDirectives = () =>
 const deleteDirective = (id) =>
   db.prepare("DELETE FROM directives WHERE id = ?").run(id);
 
+// ── Manual loops (things on you that have no digital trace — in-person, calls) ──
+const addManualLoop = (text) => {
+  const info = db.prepare("INSERT INTO manual_loops (text, created_at) VALUES (?, ?)")
+    .run(text, new Date().toISOString());
+  return info.lastInsertRowid;
+};
+const getManualLoops = (includeDone = false) =>
+  db.prepare(`SELECT id, text, created_at, done_at FROM manual_loops ${includeDone ? "" : "WHERE done_at IS NULL"} ORDER BY id DESC`).all();
+const closeManualLoop = (id) =>
+  db.prepare("UPDATE manual_loops SET done_at = ? WHERE id = ?").run(new Date().toISOString(), id);
+const reopenManualLoop = (id) =>
+  db.prepare("UPDATE manual_loops SET done_at = NULL WHERE id = ?").run(id);
+const deleteManualLoop = (id) =>
+  db.prepare("DELETE FROM manual_loops WHERE id = ?").run(id);
+
 // ── Outbox (offline / rate-limit queue) ────────────────────────
 // Any FRIDAY action that needs Claude gets parked here when Claude is at its
 // usage limit or the machine is offline, then drained automatically on recovery.
@@ -389,4 +411,5 @@ module.exports = {
   enqueueOutbox, nextPendingOutbox, hasPendingOutbox, countPendingOutbox,
   markOutboxDone, markOutboxFailed, bumpOutboxAttempt, getOutboxJob, getOutbox,
   addUsage, getUsage,
+  addManualLoop, getManualLoops, closeManualLoop, reopenManualLoop, deleteManualLoop,
 };

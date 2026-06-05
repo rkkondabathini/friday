@@ -217,7 +217,8 @@ const compactOpenLoops = (loops) => {
   if (!loops) return "  (not available)";
   const s = (loops.slackOpen || []).map(m => `- SLACK #${m.channel} · ${m.ageHours}h · @${m.user}: ${clip(m.text, 130)}`).join("\n");
   const e = (loops.emailOpen || []).map(t => `- EMAIL ${t.unread ? "(unread)" : "(read)"} from ${clip((t.from || "").replace(/<.*>/, ""), 30)}: ${clip(t.subject, 80)}`).join("\n");
-  return `${s || "  (no open Slack tags)"}\n${e || "  (no open emails)"}`;
+  const man = (loops.manual || []).map(m => `- COMMITTED (he noted this himself, in-person/ad-hoc — treat as a firm action item): ${clip(m.text, 130)}`).join("\n");
+  return `${man ? man + "\n" : ""}${s || "  (no open Slack tags)"}\n${e || "  (no open emails)"}`;
 };
 
 const generateBriefing = async (gmailData, calendarData, slackData, carryForwardTasks = [], directives = [], learnedTopics = [], openLoops = null) => {

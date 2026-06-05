@@ -76,6 +76,15 @@ export const getUsage = () =>
 export const getOpenLoops = (force) =>
   req("GET", `/api/openloops${force ? "?force=1" : ""}`);
 
+export const addManualLoop = (text) =>
+  req("POST", "/api/loops/manual", { text });
+
+export const doneManualLoop = (id) =>
+  req("POST", `/api/loops/manual/${id}/done`);
+
+export const deleteManualLoop = (id) =>
+  req("DELETE", `/api/loops/manual/${id}`);
+
 export const getOutboxJob = (id) =>
   req("GET", `/api/outbox/${id}`);
 

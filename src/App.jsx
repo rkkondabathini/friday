@@ -209,6 +209,8 @@ export default function App() {
   const [usage,    setUsage]    = useState(null);
   const [loops,    setLoops]    = useState(null);
   const [loopsBusy,setLoopsBusy]= useState(false);
+  const [newLoop,  setNewLoop]  = useState("");
+  const [expanded, setExpanded] = useState({});
   const [banner,   setBanner]   = useState(null);
   const [sheetUrl, setSheetUrl] = useState(null);
   const [memStats, setMemStats] = useState(null);
@@ -279,6 +281,15 @@ export default function App() {
     setLoopsBusy(true);
     try { const lp = await api.getOpenLoops(true); setLoops(lp); } catch {}
     setLoopsBusy(false);
+  };
+  const addLoop = async () => {
+    const text = newLoop.trim();
+    if (!text) return;
+    setNewLoop("");
+    try { const r = await api.addManualLoop(text); setLoops(l => ({ ...(l || {}), manual: r.manual })); } catch {}
+  };
+  const doneLoop = async (id) => {
+    try { const r = await api.doneManualLoop(id); setLoops(l => ({ ...(l || {}), manual: r.manual })); } catch {}
   };
 
   // " (resets ~3:40 PM)" — friendly reset time for the usage-limit messaging
@@ -504,8 +515,10 @@ export default function App() {
   const fups  = (briefing?.stakeholder_followups || []).length;
   const slackOpen = loops?.slackOpen || [];
   const emailOpen = loops?.emailOpen || [];
+  const manualOpen = loops?.manual || [];
   const sOpen = loops?.summary?.slackOpen ?? slackOpen.length;
   const eOpen = loops?.summary?.emailOpen ?? emailOpen.length;
+  const mOpen = manualOpen.length;
   const now   = new Date();
   const timeStr = now.toLocaleTimeString("en-IN", { hour:"2-digit", minute:"2-digit", hour12:false });
   const dateStr = now.toLocaleDateString("en-IN", { weekday:"short", day:"2-digit", month:"short" });
@@ -677,7 +690,7 @@ export default function App() {
           <button key={t} onClick={() => setTab(t)} style={{ flex:1, fontSize:12.5, padding:"9px", border:"none",
             background:tab===t?T.card:"transparent", color:tab===t?T.green:T.muted, borderRadius:6, transition:"all .12s",
             fontWeight:tab===t?600:400, ...M }}>
-            {t === "loops" ? `loops${sOpen+eOpen ? ` · ${sOpen+eOpen}` : ""}` : t}
+            {t === "loops" ? `loops${sOpen+mOpen ? ` · ${sOpen+mOpen}` : ""}` : t}
           </button>
         ))}
       </div>
@@ -708,34 +721,51 @@ export default function App() {
             </div>
           )}
           <Lbl>critical updates</Lbl>
-          {(briefing?.critical_updates || []).map((u, i) => (
-            <Blk key={i} accent={urgC[u.urgency || "medium"]}>
-              <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:8 }}>
-                <Tag color={urgC[u.urgency || "medium"]}>{u.urgency}</Tag>
-                <SrcTag source={u.source} />
+          {(briefing?.critical_updates || []).map((u, i) => {
+            const c = urgC[u.urgency || "medium"];
+            const key = `cu-${i}`;
+            const open = expanded[key] ?? (i === 0); // first one open, rest collapsed
+            return (
+              <div key={i} style={{ background:T.card, border:`1px solid ${T.border}`, borderLeft:`2px solid ${c}`,
+                borderRadius:6, marginBottom:6, overflow:"hidden" }}>
+                <div onClick={() => setExpanded(e => ({ ...e, [key]: !open }))}
+                  style={{ display:"flex", alignItems:"center", gap:10, padding:"11px 14px", cursor:"pointer" }}>
+                  <span style={{ width:7, height:7, borderRadius:"50%", background:c, flexShrink:0 }} />
+                  <span style={{ flex:1, fontSize:14, fontWeight:600, color:T.bright, lineHeight:1.35 }}>{u.title}</span>
+                  <i className={`ti ${srcStyle[u.source]?.icon || "ti-pencil"}`} style={{ fontSize:13, color:(srcStyle[u.source]||srcStyle.manual).color, flexShrink:0 }} />
+                  <i className={`ti ti-chevron-${open?"up":"down"}`} style={{ fontSize:14, color:T.dim, flexShrink:0 }} />
+                </div>
+                {open && (
+                  <div style={{ padding:"0 14px 12px 31px" }}>
+                    <div style={{ fontSize:13, color:T.text, lineHeight:1.7 }}>{u.detail}</div>
+                    {u.slack_url && <SlackLnk url={u.slack_url} />}
+                  </div>
+                )}
               </div>
-              <div style={{ fontSize:15, fontWeight:600, color:T.bright, marginBottom:6, lineHeight:1.4 }}>{u.title}</div>
-              <div style={{ fontSize:13, color:T.text, lineHeight:1.7 }}>{u.detail}</div>
-              {u.slack_url && <SlackLnk url={u.slack_url} />}
-            </Blk>
-          ))}
+            );
+          })}
           <div style={{ height:18 }} />
 
           <Lbl>decisions needed</Lbl>
           {!(briefing?.decisions_needed?.length)
-            ? <Note>// no pending decisions</Note>
-            : briefing.decisions_needed.map((d, i) => (
-                <Blk key={i} accent={T.purple}>
-                  <div style={{ fontSize:15, fontWeight:600, color:T.bright, marginBottom:6 }}>{d.title}</div>
-                  <div style={{ fontSize:13, color:T.text, lineHeight:1.6 }}>{d.context}</div>
-                  {d.from && (
-                    <div style={{ fontSize:11, color:"#a3a3a3", marginTop:6, padding:"3px 8px",
-                      background:T.bg, borderRadius:3, border:`1px solid ${T.border}`, display:"inline-block" }}>
-                      from: {d.from}
+            ? <Note>no pending decisions</Note>
+            : briefing.decisions_needed.map((d, i) => {
+                const key = `dn-${i}`;
+                const open = expanded[key] ?? false;
+                return (
+                  <div key={i} style={{ background:T.card, border:`1px solid ${T.border}`, borderLeft:`2px solid ${T.purple}`,
+                    borderRadius:6, marginBottom:6, overflow:"hidden" }}>
+                    <div onClick={() => setExpanded(e => ({ ...e, [key]: !open }))}
+                      style={{ display:"flex", alignItems:"center", gap:10, padding:"11px 14px", cursor:"pointer" }}>
+                      <i className="ti ti-help-circle" style={{ fontSize:14, color:T.purple, flexShrink:0 }} />
+                      <span style={{ flex:1, fontSize:14, fontWeight:600, color:T.bright, lineHeight:1.35 }}>{d.title}</span>
+                      {d.from && <span style={{ fontSize:11, color:T.dim, flexShrink:0, ...M }}>{d.from}</span>}
+                      <i className={`ti ti-chevron-${open?"up":"down"}`} style={{ fontSize:14, color:T.dim, flexShrink:0 }} />
                     </div>
-                  )}
-                </Blk>
-              ))
+                    {open && <div style={{ padding:"0 14px 12px 38px", fontSize:13, color:T.text, lineHeight:1.6 }}>{d.context}</div>}
+                  </div>
+                );
+              })
           }
           <div style={{ height:18 }} />
 
@@ -771,7 +801,38 @@ export default function App() {
             </button>
           </div>
 
-          {!loops ? <Note>// detecting open loops…</Note> : (sOpen + eOpen === 0) ? (
+          {/* Quick capture — for in-person / calls / anything with no digital trace */}
+          <div style={{ display:"flex", gap:6, marginBottom:8 }}>
+            <input value={newLoop} onChange={e => setNewLoop(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && addLoop()}
+              placeholder="jot something that's on you — e.g. Program Master update, call vendor…"
+              style={{ flex:1 }} />
+            <button onClick={addLoop} style={{ padding:"8px 16px", background:T.green, border:"none",
+              borderRadius:5, color:T.bg, fontWeight:700, fontSize:12, ...M }}>add</button>
+          </div>
+
+          {/* Captured — things you noted yourself (highest priority, only you know these) */}
+          {manualOpen.length > 0 && (
+            <div style={{ marginBottom:18 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:8, margin:"6px 0 10px" }}>
+                <i className="ti ti-pin" style={{ fontSize:14, color:T.purple }} />
+                <span style={{ fontSize:12, fontWeight:700, color:T.purple, letterSpacing:".08em", ...M }}>CAPTURED · ON YOU</span>
+                <span style={{ fontSize:11, color:T.dim, ...M }}>{mOpen}</span>
+              </div>
+              {manualOpen.map(m => (
+                <div key={m.id} style={{ display:"flex", gap:10, alignItems:"center", background:T.card,
+                  border:`1px solid ${T.border}`, borderLeft:`2px solid ${T.purple}`, borderRadius:6, padding:"10px 14px", marginBottom:6 }}>
+                  <button onClick={() => doneLoop(m.id)} title="Mark done"
+                    style={{ width:18, height:18, borderRadius:4, border:`1.5px solid ${T.borderB}`, background:"transparent",
+                      display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, color:T.green, fontSize:11 }}>✓</button>
+                  <span style={{ flex:1, fontSize:13, color:T.text, lineHeight:1.5, ...M }}>{m.text}</span>
+                  <i className="ti ti-trash" onClick={() => doneLoop(m.id)} style={{ fontSize:13, color:T.dim, cursor:"pointer", flexShrink:0 }} />
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!loops ? <Note>// detecting open loops…</Note> : (sOpen + eOpen + mOpen === 0) ? (
             <div style={{ textAlign:"center", padding:"40px 0", color:T.dim }}>
               <i className="ti ti-circle-check" style={{ fontSize:30, color:T.green, marginBottom:10, display:"block" }} />
               <div style={{ fontSize:14, color:T.green, ...M }}>All caught up</div>
