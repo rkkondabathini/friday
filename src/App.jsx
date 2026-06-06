@@ -254,6 +254,10 @@ export default function App() {
   const [loopsBusy,setLoopsBusy]= useState(false);
   const [newLoop,  setNewLoop]  = useState("");
   const [expanded, setExpanded] = useState({});
+  const [learnOpen, setLearnOpen] = useState(false);
+  const [learnRead, setLearnRead] = useState(() => { try { return localStorage.getItem("friday_learn_read"); } catch { return null; } });
+  const [rightTab, setRightTab] = useState("loops");   // which right-panel section is shown
+  const [showAll,  setShowAll]  = useState({});         // per-section "expanded" flag
   const [banner,   setBanner]   = useState(null);
   const [sheetUrl, setSheetUrl] = useState(null);
   const [memStats, setMemStats] = useState(null);
@@ -333,6 +337,11 @@ export default function App() {
   };
   const doneLoop = async (id) => {
     try { const r = await api.doneManualLoop(id); setLoops(l => ({ ...(l || {}), manual: r.manual })); } catch {}
+  };
+  const openLearn = () => {
+    setLearnOpen(o => !o);
+    const t = data?.learn?.title;
+    if (t) { try { localStorage.setItem("friday_learn_read", t); } catch {} setLearnRead(t); }
   };
 
   // " (resets ~3:40 PM)" — friendly reset time for the usage-limit messaging
@@ -578,9 +587,250 @@ export default function App() {
   const timeStr = now.toLocaleTimeString("en-IN", { hour:"2-digit", minute:"2-digit", hour12:false });
   const dateStr = now.toLocaleDateString("en-IN", { weekday:"short", day:"2-digit", month:"short" });
 
+  // A "+ show all (N)" / "show less" toggle for a capped section.
+  const Expander = ({ k, total, cap }) => total > cap ? (
+    <button onClick={() => setShowAll(s => ({ ...s, [k]: !s[k] }))}
+      style={{ fontSize:11.5, color:T.muted, background:"transparent", border:`1px solid ${T.border}`,
+        borderRadius:8, padding:"6px 11px", marginTop:6, display:"inline-flex", alignItems:"center", gap:5, ...M }}>
+      <i className={`ti ti-chevron-${showAll[k]?"up":"down"}`} style={{ fontSize:13 }} />
+      {showAll[k] ? "show less" : `show all (${total})`}
+    </button>
+  ) : null;
+
+  // Today's schedule as a compact vertical timeline (capped to 6 unless expanded).
+  const renderSchedule = () => {
+    const all = schedule || [];
+    if (!all.length) return <Note>no schedule yet — hit sync</Note>;
+    const shown = showAll.today ? all : all.slice(0, 6);
+    return (
+      <div style={{ position:"relative" }}>
+        {shown.map((b, i) => {
+          const [h, m]   = (b.time || "0:0").split(":").map(Number);
+          const start    = new Date(); start.setHours(h, m, 0, 0);
+          const next     = schedule[i + 1];
+          const [nh, nm] = next ? (next.time || "0:0").split(":").map(Number) : [h+1, 0];
+          const end      = new Date(); end.setHours(nh, nm, 0, 0);
+          const isNow    = now >= start && now < end;
+          const isPast   = now >= end;
+          const c        = tyC[b.type] || T.muted;
+          return (
+            <div key={i} style={{ display:"flex", gap:11, alignItems:"stretch", opacity:isPast?0.4:1 }}>
+              <div style={{ width:38, flexShrink:0, textAlign:"right", paddingTop:11 }}>
+                <div style={{ fontSize:11.5, fontWeight:600, color:isNow?T.green:T.muted, ...MONO }}>{b.time}</div>
+              </div>
+              <div style={{ display:"flex", flexDirection:"column", alignItems:"center", flexShrink:0 }}>
+                <div style={{ width:26, height:26, borderRadius:8, marginTop:8, background:isNow?c:T.bg,
+                  border:`1px solid ${isNow?c:T.border}`, display:"flex", alignItems:"center", justifyContent:"center",
+                  boxShadow:isNow?`0 0 0 4px ${c}22`:"none", zIndex:1 }}>
+                  <i className={`ti ${tyI[b.type]||"ti-clock"}`} style={{ fontSize:13, color:isNow?T.bg:c }} />
+                </div>
+                {i < shown.length-1 && <div style={{ width:1.5, flex:1, background:T.border, minHeight:12 }} />}
+              </div>
+              <div style={{ flex:1, minWidth:0, marginBottom:7, paddingTop:9 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:7 }}>
+                  <span style={{ flex:1, fontSize:13, fontWeight:600, color:isNow?T.bright:T.text, lineHeight:1.3 }}>{b.block}</span>
+                  {isNow && <span style={{ fontSize:9, fontWeight:700, color:T.bg, background:T.green, padding:"1px 6px", borderRadius:20, ...MONO }}>NOW</span>}
+                </div>
+                {b.notes && <div style={{ fontSize:11.5, color:T.dim, lineHeight:1.5, marginTop:2 }}>{b.notes}</div>}
+              </div>
+            </div>
+          );
+        })}
+        <Expander k="today" total={all.length} cap={6} />
+      </div>
+    );
+  };
+
+  // Open loops — capture box + manual + Slack + email, each capped (expand for all).
+  const renderLoops = () => {
+    const exp = !!showAll.loops;
+    const sl = exp ? slackOpen : slackOpen.slice(0, 6);
+    const em = exp ? emailOpen : emailOpen.slice(0, 4);
+    const moreThanCap = slackOpen.length > 6 || emailOpen.length > 4 || (loops?.summary?.emailShown < eOpen);
+    return (
+      <>
+        <div style={{ display:"flex", gap:6, marginBottom:12 }}>
+          <input value={newLoop} onChange={e => setNewLoop(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && addLoop()}
+            placeholder="jot something on you — Program Master update, call vendor…" style={{ flex:1 }} />
+          <button onClick={addLoop} style={{ padding:"9px 15px", background:T.green, border:"none", borderRadius:8, color:T.bg, fontWeight:600, fontSize:12.5, ...M }}>add</button>
+        </div>
+        {!loops ? <Note>detecting open loops…</Note> : (sOpen + eOpen + mOpen === 0) ? (
+          <div style={{ textAlign:"center", padding:"30px 0", color:T.dim }}>
+            <i className="ti ti-circle-check" style={{ fontSize:28, color:T.green, marginBottom:8, display:"block" }} />
+            <div style={{ fontSize:13.5, color:T.green }}>All caught up</div>
+            <div style={{ fontSize:12, color:T.dim, marginTop:3 }}>nothing's waiting on a reply from you</div>
+          </div>
+        ) : (
+          <>
+            {manualOpen.length > 0 && (
+              <div style={{ marginBottom:14 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:8 }}>
+                  <i className="ti ti-pin" style={{ fontSize:13, color:T.purple }} />
+                  <span style={{ fontSize:11, fontWeight:700, color:T.purple, letterSpacing:".07em", ...MONO }}>CAPTURED</span>
+                  <span style={{ fontSize:10.5, color:T.dim, ...MONO }}>{mOpen}</span>
+                </div>
+                {manualOpen.map(m => (
+                  <div key={m.id} style={{ display:"flex", gap:9, alignItems:"center", background:T.bg,
+                    border:`1px solid ${T.border}`, borderLeft:`2px solid ${T.purple}`, borderRadius:8, padding:"9px 12px", marginBottom:5 }}>
+                    <button onClick={() => doneLoop(m.id)} title="Mark done"
+                      style={{ width:17, height:17, borderRadius:5, border:`1.5px solid ${T.borderB}`, background:"transparent",
+                        display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, color:T.green, fontSize:10 }}>✓</button>
+                    <span style={{ flex:1, fontSize:12.5, color:T.text, lineHeight:1.45 }}>{m.text}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {slackOpen.length > 0 && (
+              <div style={{ marginBottom:em.length||eOpen ? 14 : 0 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:8 }}>
+                  <i className="ti ti-brand-slack" style={{ fontSize:13, color:T.slack }} />
+                  <span style={{ fontSize:11, fontWeight:700, color:T.slack, letterSpacing:".07em", ...MONO }}>SLACK</span>
+                  <span style={{ fontSize:10.5, color:T.dim, ...MONO }}>{sOpen}</span>
+                </div>
+                {sl.map((m, i) => (
+                  <a key={m.id || i} href={m.slack_url} target="_blank" rel="noopener noreferrer" style={{ display:"block", textDecoration:"none" }}>
+                    <div className="hovcard" style={{ background:T.bg, border:`1px solid ${T.border}`, borderLeft:`2px solid ${T.slack}`, borderRadius:8, padding:"9px 12px", marginBottom:5 }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, marginBottom:3 }}>
+                        <span style={{ fontSize:11.5, color:T.slack, fontWeight:600 }}>#{m.channel}</span>
+                        <span style={{ fontSize:10, color:m.ageHours>=24?T.red:T.dim, ...MONO }}>{m.ageHours>=24 ? `${Math.floor(m.ageHours/24)}d` : `${m.ageHours}h`}</span>
+                      </div>
+                      <div style={{ fontSize:12.5, color:T.text, lineHeight:1.5 }}>
+                        <span style={{ color:T.muted }}>@{m.user}: </span>
+                        {(m.text || "").replace(/<@[A-Z0-9]+\|([^>]+)>/g, "@$1").replace(/\s+/g," ").slice(0, 130)}
+                      </div>
+                    </div>
+                  </a>
+                ))}
+              </div>
+            )}
+            {emailOpen.length > 0 && (
+              <div>
+                <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:8 }}>
+                  <i className="ti ti-mail" style={{ fontSize:13, color:T.cal }} />
+                  <span style={{ fontSize:11, fontWeight:700, color:T.cal, letterSpacing:".07em", ...MONO }}>EMAIL</span>
+                  <span style={{ fontSize:10.5, color:T.dim, ...MONO }}>{eOpen}{loops?.summary?.emailUnread ? ` · ${loops.summary.emailUnread} unread` : ""}</span>
+                </div>
+                {em.map((t, i) => (
+                  <div key={t.id || i} style={{ background:T.bg, border:`1px solid ${T.border}`, borderLeft:`2px solid ${T.cal}`, borderRadius:8, padding:"9px 12px", marginBottom:5, opacity:t.unread?1:0.65 }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, marginBottom:2 }}>
+                      <span style={{ fontSize:12.5, color:T.bright, fontWeight:t.unread?600:500 }}>
+                        {t.unread && <span style={{ color:T.cal, marginRight:5 }}>●</span>}
+                        {(t.from || "").replace(/<.*>/, "").replace(/"/g,"").trim().slice(0, 30)}
+                      </span>
+                    </div>
+                    <div style={{ fontSize:12, color:T.text, lineHeight:1.45 }}>{(t.subject || "(no subject)").slice(0, 80)}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {moreThanCap && (
+              <button onClick={() => setShowAll(s => ({ ...s, loops: !s.loops }))}
+                style={{ fontSize:11.5, color:T.muted, background:"transparent", border:`1px solid ${T.border}`,
+                  borderRadius:8, padding:"6px 11px", marginTop:8, display:"inline-flex", alignItems:"center", gap:5, ...M }}>
+                <i className={`ti ti-chevron-${exp?"up":"down"}`} style={{ fontSize:13 }} />
+                {exp ? "show less" : `show all (${sOpen + eOpen})`}
+              </button>
+            )}
+          </>
+        )}
+      </>
+    );
+  };
+
+  // Standup — leadership / team toggle.
+  const renderStandup = () => (
+    <>
+      <div style={{ display:"flex", gap:6, marginBottom:14 }}>
+        {["leadership", "team"].map(m => (
+          <button key={m} onClick={() => setSdMode(m)} style={{ fontSize:12, padding:"6px 14px", borderRadius:8,
+            border:`1px solid ${sdMode===m?(m==="leadership"?T.blue:T.green)+"66":T.border}`,
+            background:sdMode===m?(m==="leadership"?T.blueD:T.greenD):"transparent",
+            color:sdMode===m?(m==="leadership"?T.blue:T.green):T.muted, fontWeight:sdMode===m?600:500, ...M }}>
+            {m}
+          </button>
+        ))}
+      </div>
+      {sdMode === "leadership" && ["yesterday","today","blockers"].map(k => (
+        <div key={k} style={{ marginBottom:14 }}>
+          <div style={{ fontSize:10.5, fontWeight:600, color:{yesterday:T.muted,today:T.green,blockers:T.red}[k], letterSpacing:".09em", textTransform:"uppercase", marginBottom:7, ...MONO }}>{k}</div>
+          {(standup?.leadership?.[k] || []).map((item, i) => (
+            <div key={i} style={{ display:"flex", gap:9, marginBottom:7 }}>
+              <span style={{ color:{yesterday:T.muted,today:T.green,blockers:T.red}[k], fontSize:12, flexShrink:0, marginTop:2 }}>•</span>
+              <span style={{ fontSize:12.5, color:T.text, lineHeight:1.55 }}>{item}</span>
+            </div>
+          ))}
+        </div>
+      ))}
+      {sdMode === "team" && (
+        <div>
+          {["yesterday","today"].map(k => (
+            <div key={k} style={{ marginBottom:14 }}>
+              <div style={{ fontSize:10.5, fontWeight:600, color:k==="today"?T.green:T.muted, letterSpacing:".09em", textTransform:"uppercase", marginBottom:7, ...MONO }}>{k}</div>
+              {(standup?.team?.[k] || []).map((item, i) => (
+                <div key={i} style={{ display:"flex", gap:9, marginBottom:7 }}>
+                  <span style={{ color:k==="today"?T.green:T.muted, fontSize:12, flexShrink:0, marginTop:2 }}>•</span>
+                  <span style={{ fontSize:12.5, color:T.text, lineHeight:1.55 }}>{item}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+          <div style={{ fontSize:10.5, fontWeight:600, color:T.amber, letterSpacing:".09em", textTransform:"uppercase", marginBottom:7, ...MONO }}>delegate</div>
+          {(standup?.team?.delegate || []).map((item, i) => (
+            <div key={i} style={{ display:"flex", gap:9, alignItems:"flex-start", background:T.bg, border:`1px solid ${T.border}`, borderRadius:8, padding:"9px 12px", marginBottom:5 }}>
+              <span style={{ color:T.amber, fontSize:13, flexShrink:0 }}>→</span>
+              <span style={{ fontSize:12.5, color:T.text, lineHeight:1.5 }}>{item}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
+
   return (
     <div style={{ background:T.bg, minHeight:"100vh", padding:"24px clamp(16px,4vw,40px) 110px", width:"100%", maxWidth:1480, margin:"0 auto", ...M }}>
       <style>{css}</style>
+
+      {/* Floating Learn-today — out of the way; glance only if you want to */}
+      {learn && learn.title && (
+        <div style={{ position:"fixed", bottom:20, left:20, zIndex:300 }}>
+          {learnOpen && (
+            <div className="fadeIn" style={{ position:"absolute", bottom:64, left:0, width:360,
+              background:T.panel, border:`1px solid ${T.purple}55`, borderRadius:12, overflow:"hidden",
+              boxShadow:`0 24px 48px rgba(0,0,0,.7)` }}>
+              <div style={{ padding:"12px 15px", borderBottom:`1px solid ${T.border}`, display:"flex", alignItems:"center", gap:8 }}>
+                <i className="ti ti-bulb" style={{ fontSize:15, color:T.purple }} />
+                <span style={{ fontSize:11.5, fontWeight:700, color:T.purple, letterSpacing:".1em", flex:1, ...MONO }}>LEARN TODAY</span>
+                {learn.category && <Tag color={T.cyan}>{learn.category}</Tag>}
+                <button onClick={() => setLearnOpen(false)} style={{ background:"transparent", border:"none", color:T.dim, fontSize:14 }}><i className="ti ti-x" /></button>
+              </div>
+              <div style={{ padding:"13px 15px", maxHeight:380, overflowY:"auto" }}>
+                <div style={{ fontSize:14.5, fontWeight:600, color:T.bright, marginBottom:7, lineHeight:1.3 }}>{learn.title}</div>
+                <div style={{ fontSize:13, color:T.text, lineHeight:1.65, marginBottom:learn.example?9:0 }}>{learn.lesson}</div>
+                {learn.example && (
+                  <div style={{ fontSize:12, color:T.cyan, background:T.bg, border:`1px solid ${T.border}`,
+                    borderRadius:8, padding:"9px 11px", margin:"0 0 9px", whiteSpace:"pre-wrap", lineHeight:1.5, ...MONO }}>{learn.example}</div>
+                )}
+                {learn.try_this && (
+                  <div style={{ fontSize:12.5, color:T.muted, lineHeight:1.6 }}>
+                    <span style={{ color:T.green, fontWeight:700 }}>try today → </span>{learn.try_this}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          <button onClick={openLearn} title="Learn something new today"
+            style={{ width:48, height:48, borderRadius:"50%", background:learnOpen?T.card:T.panel,
+              border:`1px solid ${learnOpen?T.purple:T.border}`, color:T.purple, position:"relative",
+              display:"flex", alignItems:"center", justifyContent:"center", boxShadow:"0 4px 18px rgba(0,0,0,.45)" }}>
+            <i className={`ti ${learnOpen?"ti-x":"ti-bulb"}`} style={{ fontSize:20 }} />
+            {!learnOpen && learnRead !== learn.title && (
+              <span style={{ position:"absolute", top:9, right:9, width:9, height:9, borderRadius:"50%",
+                background:T.purple, border:`2px solid ${T.panel}`, boxShadow:`0 0 8px ${T.purple}` }} />
+            )}
+          </button>
+        </div>
+      )}
 
       {/* Floating chat */}
       <div style={{ position:"fixed", bottom:20, right:20, zIndex:300 }}>
@@ -674,20 +924,52 @@ export default function App() {
         )}
       </div>
 
-      {/* Header — wordmark + sync */}
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:22 }}>
+      {/* Top bar — brand + connections (left), pulse + focus + sync (right) */}
+      <div style={{ display:"flex", alignItems:"center", gap:14, flexWrap:"wrap", marginBottom:18 }}>
         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
           <div style={{ width:30, height:30, borderRadius:9, background:`linear-gradient(135deg, ${T.green}, ${T.cyan})`,
             display:"flex", alignItems:"center", justifyContent:"center", boxShadow:`0 4px 16px ${T.green}33` }}>
             <span style={{ fontSize:15, fontWeight:800, color:T.bg }}>F</span>
           </div>
           <div>
-            <div style={{ fontSize:15, fontWeight:700, color:T.bright, letterSpacing:".02em", lineHeight:1 }}>FRIDAY</div>
-            <div style={{ fontSize:10.5, color:T.dim, marginTop:2, ...MONO }}>{dateStr} · {timeStr} IST</div>
+            <div style={{ fontSize:14.5, fontWeight:700, color:T.bright, lineHeight:1 }}>FRIDAY</div>
+            <div style={{ fontSize:10, color:T.dim, marginTop:2, ...MONO }}>{dateStr} · {timeStr}</div>
           </div>
         </div>
-        <button onClick={doSync} disabled={syncing} style={{ fontSize:12, padding:"8px 16px", fontWeight:600,
-          background:T.green, border:"none", borderRadius:8, color:T.bg, display:"inline-flex", alignItems:"center", gap:6,
+        {/* connection dots */}
+        <div style={{ display:"flex", alignItems:"center", gap:10, paddingLeft:6, borderLeft:`1px solid ${T.border}` }}>
+          {SERVICES.map(s => {
+            const st = conns.find(c => c.provider === s.provider) || {};
+            const on = !!st.connected;
+            return (
+              <span key={s.key} title={`${s.label}: ${on ? "connected" : "tap to connect"}`}
+                onClick={() => on ? doDisconnect(s.provider) : doConnect(s.provider)}
+                style={{ display:"inline-flex", alignItems:"center", gap:4, cursor:"pointer", color:on?T.muted:T.dim }}>
+                <span style={{ width:7, height:7, borderRadius:"50%", background:on?s.color:T.border, boxShadow:on?`0 0 6px ${s.color}88`:"none" }} />
+                <i className={`ti ${s.icon}`} style={{ fontSize:14 }} />
+              </span>
+            );
+          })}
+        </div>
+
+        <span style={{ flex:1, minWidth:12 }} />
+
+        {/* pulse chips */}
+        {[[sOpen,"Slack",T.slack,"ti-brand-slack"],
+          [eOpen,"Email",T.cal,"ti-mail"],
+          [meets,"Meets",T.green,"ti-calendar-event"],
+          [fups,"Follow-ups",T.amber,"ti-user-up"]]
+          .map(([v,l,c,ic]) => (
+            <div key={l} title={l} className="hovcard" style={{ display:"inline-flex", alignItems:"center", gap:6,
+              background:T.card, border:`1px solid ${T.border}`, borderRadius:10, padding:"6px 11px" }}>
+              <i className={`ti ${ic}`} style={{ fontSize:13, color:c }} />
+              <span style={{ fontSize:15, fontWeight:700, color:v>0?T.bright:T.dim, ...MONO }}>{v}</span>
+              <span style={{ fontSize:11, color:T.muted }}>{l}</span>
+            </div>
+          ))}
+        {focusScore != null && <FocusScore score={focusScore} />}
+        <button onClick={doSync} disabled={syncing} style={{ fontSize:12, padding:"9px 16px", fontWeight:600,
+          background:T.green, border:"none", borderRadius:10, color:T.bg, display:"inline-flex", alignItems:"center", gap:6,
           opacity:syncing?0.6:1, ...M }}>
           <i className={`ti ti-refresh ${syncing ? "spin" : ""}`} style={{ fontSize:13 }} />
           {syncing ? "syncing…" : "Sync"}
@@ -731,55 +1013,12 @@ export default function App() {
         </div>
       )}
 
-      <ConnectBar conns={conns} onConnect={doConnect} onDisconnect={doDisconnect} />
-
-      {/* Pulse strip — compact indicators + focus score */}
-      <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center", marginBottom:18 }}>
-        {[[sOpen,"Slack",T.slack,"ti-brand-slack"],
-          [eOpen,"Email",T.cal,"ti-mail"],
-          [meets,"Meetings",T.green,"ti-calendar-event"],
-          [fups,"Follow-ups",T.amber,"ti-user-up"]]
-          .map(([v,l,c,ic]) => (
-            <div key={l} className="hovcard" style={{ display:"inline-flex", alignItems:"center", gap:8,
-              background:T.card, border:`1px solid ${T.border}`, borderRadius:11, padding:"8px 13px" }}>
-              <i className={`ti ${ic}`} style={{ fontSize:14, color:c }} />
-              <span style={{ fontSize:17, fontWeight:700, color:v>0?T.bright:T.dim, letterSpacing:"-0.03em", ...MONO }}>{v}</span>
-              <span style={{ fontSize:11.5, color:T.muted }}>{l}</span>
-            </div>
-          ))}
-        <span style={{ flex:1 }} />
-        {focusScore != null && <FocusScore score={focusScore} />}
-      </div>
-
       {/* ── Cockpit: everything on one screen ── */}
       <div style={{ display:"grid", gridTemplateColumns:"minmax(0,1.55fr) minmax(0,1fr)", gap:16, alignItems:"start" }}>
 
       {/* LEFT — what needs you */}
       <div style={{ display:"flex", flexDirection:"column", gap:16, minWidth:0 }}>
-        <div>
-          {learn && learn.title && (
-            <div style={{ background:`linear-gradient(135deg, ${T.purpleD}, ${T.cyanD})`,
-              border:`1px solid ${T.purple}44`, borderLeft:`2px solid ${T.purple}`, borderRadius:6,
-              padding:"12px 16px", marginBottom:14 }}>
-              <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:7 }}>
-                <i className="ti ti-bulb" style={{ fontSize:14, color:T.purple }} />
-                <span style={{ fontSize:11, fontWeight:700, color:T.purple, letterSpacing:".12em", ...M }}>LEARN TODAY</span>
-                {learn.category && <Tag color={T.cyan}>{learn.category}</Tag>}
-              </div>
-              <div style={{ fontSize:14, fontWeight:600, color:T.bright, marginBottom:5 }}>{learn.title}</div>
-              <div style={{ fontSize:13, color:T.text, lineHeight:1.65, marginBottom:learn.example?7:0 }}>{learn.lesson}</div>
-              {learn.example && (
-                <div style={{ fontSize:12, color:T.cyan, background:T.bg, border:`1px solid ${T.border}`,
-                  borderRadius:4, padding:"7px 10px", margin:"2px 0 7px", whiteSpace:"pre-wrap", ...M }}>{learn.example}</div>
-              )}
-              {learn.try_this && (
-                <div style={{ fontSize:12, color:T.muted, lineHeight:1.6 }}>
-                  <span style={{ color:T.green, fontWeight:700 }}>try today → </span>{learn.try_this}
-                </div>
-              )}
-            </div>
-          )}
-          <Lbl>critical updates</Lbl>
+        <Panel title="Needs you" icon="ti-flame" accent={T.red} count={(briefing?.critical_updates||[]).length}>
           {(briefing?.critical_updates || []).map((u, i) => {
             const c = urgC[u.urgency || "medium"];
             const key = `cu-${i}`;
@@ -843,291 +1082,45 @@ export default function App() {
               </div>
             </Blk>
           ))}
-        </div>
+        </Panel>
       </div>
 
-      {/* RIGHT — at a glance */}
-      <div style={{ display:"flex", flexDirection:"column", gap:16, minWidth:0 }}>
-        <div>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
-            <div style={{ fontSize:12, color:T.muted, lineHeight:1.6, ...M }}>
-              Things still on you — auto-detected from what you've replied to. Nothing to tick off.
-            </div>
-            <button onClick={refreshLoops} disabled={loopsBusy} style={{ fontSize:11, padding:"6px 12px",
-              background:"transparent", border:`1px solid ${T.border}`, borderRadius:5, color:T.muted, flexShrink:0, ...M }}>
-              <i className={`ti ti-refresh ${loopsBusy?"spin":""}`} style={{ fontSize:12, verticalAlign:"-2px", marginRight:4 }} />
-              refresh
-            </button>
-          </div>
-
-          {/* Quick capture — for in-person / calls / anything with no digital trace */}
-          <div style={{ display:"flex", gap:6, marginBottom:8 }}>
-            <input value={newLoop} onChange={e => setNewLoop(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && addLoop()}
-              placeholder="jot something that's on you — e.g. Program Master update, call vendor…"
-              style={{ flex:1 }} />
-            <button onClick={addLoop} style={{ padding:"8px 16px", background:T.green, border:"none",
-              borderRadius:5, color:T.bg, fontWeight:700, fontSize:12, ...M }}>add</button>
-          </div>
-
-          {/* Captured — things you noted yourself (highest priority, only you know these) */}
-          {manualOpen.length > 0 && (
-            <div style={{ marginBottom:18 }}>
-              <div style={{ display:"flex", alignItems:"center", gap:8, margin:"6px 0 10px" }}>
-                <i className="ti ti-pin" style={{ fontSize:14, color:T.purple }} />
-                <span style={{ fontSize:12, fontWeight:700, color:T.purple, letterSpacing:".08em", ...M }}>CAPTURED · ON YOU</span>
-                <span style={{ fontSize:11, color:T.dim, ...M }}>{mOpen}</span>
-              </div>
-              {manualOpen.map(m => (
-                <div key={m.id} style={{ display:"flex", gap:10, alignItems:"center", background:T.card,
-                  border:`1px solid ${T.border}`, borderLeft:`2px solid ${T.purple}`, borderRadius:6, padding:"10px 14px", marginBottom:6 }}>
-                  <button onClick={() => doneLoop(m.id)} title="Mark done"
-                    style={{ width:18, height:18, borderRadius:4, border:`1.5px solid ${T.borderB}`, background:"transparent",
-                      display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, color:T.green, fontSize:11 }}>✓</button>
-                  <span style={{ flex:1, fontSize:13, color:T.text, lineHeight:1.5, ...M }}>{m.text}</span>
-                  <i className="ti ti-trash" onClick={() => doneLoop(m.id)} style={{ fontSize:13, color:T.dim, cursor:"pointer", flexShrink:0 }} />
-                </div>
-              ))}
-            </div>
+      {/* RIGHT — switchable cockpit: one section at a time, picked from the icon rail */}
+      <div style={{ display:"flex", gap:10, alignItems:"flex-start", minWidth:0 }}>
+        <div style={{ flex:1, minWidth:0 }}>
+          {rightTab === "today" && (
+            <Panel title="Today" icon="ti-calendar" accent={T.green}>{renderSchedule()}</Panel>
           )}
-
-          {!loops ? <Note>// detecting open loops…</Note> : (sOpen + eOpen + mOpen === 0) ? (
-            <div style={{ textAlign:"center", padding:"40px 0", color:T.dim }}>
-              <i className="ti ti-circle-check" style={{ fontSize:30, color:T.green, marginBottom:10, display:"block" }} />
-              <div style={{ fontSize:14, color:T.green, ...M }}>All caught up</div>
-              <div style={{ fontSize:12, color:T.dim, marginTop:4, ...M }}>nothing's waiting on a reply from you</div>
-            </div>
-          ) : (
-            <>
-              {/* Slack open loops — primary */}
-              <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
-                <i className="ti ti-brand-slack" style={{ fontSize:14, color:T.slack }} />
-                <span style={{ fontSize:12, fontWeight:700, color:T.slack, letterSpacing:".08em", ...M }}>SLACK · WAITING ON YOU</span>
-                <span style={{ fontSize:11, color:T.dim, ...M }}>{sOpen}</span>
-              </div>
-              {slackOpen.length === 0 ? <Note>// you're clear on Slack</Note> : slackOpen.map((m, i) => (
-                <a key={m.id || i} href={m.slack_url} target="_blank" rel="noopener noreferrer"
-                  style={{ display:"block", textDecoration:"none" }}>
-                  <div style={{ background:T.card, border:`1px solid ${T.border}`, borderLeft:`2px solid ${T.slack}`,
-                    borderRadius:6, padding:"10px 14px", marginBottom:6, transition:"border .12s" }}>
-                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, marginBottom:4 }}>
-                      <span style={{ fontSize:12, color:T.slack, fontWeight:600, ...M }}>#{m.channel}</span>
-                      <span style={{ fontSize:10, color:m.ageHours>=24?T.red:T.dim, ...M }}>
-                        {m.ageHours>=24 ? `${Math.floor(m.ageHours/24)}d` : `${m.ageHours}h`} ago
-                      </span>
-                    </div>
-                    <div style={{ fontSize:13, color:T.text, lineHeight:1.55, ...M }}>
-                      <span style={{ color:T.muted }}>@{m.user}: </span>
-                      {(m.text || "").replace(/<@[A-Z0-9]+\|([^>]+)>/g, "@$1").replace(/\s+/g," ").slice(0, 160)}
-                    </div>
-                  </div>
-                </a>
-              ))}
-
-              {/* Email open loops — secondary */}
-              <div style={{ display:"flex", alignItems:"center", gap:8, margin:"18px 0 10px" }}>
-                <i className="ti ti-mail" style={{ fontSize:14, color:T.cal }} />
-                <span style={{ fontSize:12, fontWeight:700, color:T.cal, letterSpacing:".08em", ...M }}>EMAIL · WAITING ON YOU</span>
-                <span style={{ fontSize:11, color:T.dim, ...M }}>{eOpen}{loops?.summary?.emailUnread ? ` · ${loops.summary.emailUnread} unread` : ""}</span>
-              </div>
-              {emailOpen.length === 0 ? <Note>// inbox clear</Note> : emailOpen.map((t, i) => (
-                <div key={t.id || i} style={{ background:T.card, border:`1px solid ${T.border}`, borderLeft:`2px solid ${T.cal}`,
-                  borderRadius:6, padding:"10px 14px", marginBottom:6, opacity:t.unread?1:0.7 }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, marginBottom:3 }}>
-                    <span style={{ fontSize:13, color:T.bright, fontWeight:t.unread?600:500, ...M }}>
-                      {t.unread && <span style={{ color:T.cal, marginRight:6 }}>●</span>}
-                      {(t.from || "").replace(/<.*>/, "").replace(/"/g,"").trim().slice(0, 34)}
-                    </span>
-                    <span style={{ fontSize:10, color:T.dim, ...M }}>{t.unread ? "unread" : "read"}</span>
-                  </div>
-                  <div style={{ fontSize:12.5, color:T.text, lineHeight:1.5, ...M }}>{(t.subject || "(no subject)").slice(0, 90)}</div>
-                  {t.snippet && <div style={{ fontSize:11, color:T.dim, marginTop:3, lineHeight:1.5, ...M }}>{t.snippet.slice(0, 110)}</div>}
-                </div>
-              ))}
-              {loops?.summary?.emailShown < eOpen && (
-                <Note>// +{eOpen - loops.summary.emailShown} more open in Gmail (showing unread &amp; most recent first)</Note>
-              )}
-            </>
+          {rightTab === "loops" && (
+            <Panel title="Open loops" icon="ti-target" accent={T.slack} count={sOpen+mOpen}
+              action={<button onClick={refreshLoops} disabled={loopsBusy} title="Re-scan"
+                style={{ background:"transparent", border:"none", color:T.dim, cursor:"pointer" }}>
+                <i className={`ti ti-refresh ${loopsBusy?"spin":""}`} style={{ fontSize:14 }} /></button>}>
+              {renderLoops()}
+            </Panel>
+          )}
+          {rightTab === "standup" && (
+            <Panel title="Standup" icon="ti-presentation" accent={T.blue}>{renderStandup()}</Panel>
           )}
         </div>
-
-      {/* Standup */}
-      <div>
-          <div style={{ display:"flex", gap:6, marginBottom:14 }}>
-            {["leadership", "team"].map(m => (
-              <button key={m} onClick={() => setSdMode(m)} style={{ fontSize:12, padding:"7px 16px",
-                border:`1px solid ${sdMode===m?(m==="leadership"?T.blue:T.green)+"66":T.border}`,
-                borderRadius:4, background:sdMode===m?(m==="leadership"?T.blueD:T.greenD):"transparent",
-                color:sdMode===m?(m==="leadership"?T.blue:T.green):T.muted, ...M }}>
-                {m === "leadership" ? "// leadership" : "// team"}
+        {/* vertical icon rail */}
+        <div style={{ position:"sticky", top:18, display:"flex", flexDirection:"column", gap:7, flexShrink:0 }}>
+          {[["today","ti-calendar",meets,T.green],["loops","ti-target",sOpen+mOpen,T.slack],["standup","ti-presentation",0,T.blue]].map(([k,icon,badge,color]) => {
+            const on = rightTab === k;
+            return (
+              <button key={k} onClick={() => setRightTab(k)} title={k}
+                style={{ width:46, height:46, borderRadius:12, position:"relative", cursor:"pointer",
+                  background:on?T.card:"transparent", border:`1px solid ${on?T.borderB:"transparent"}`,
+                  color:on?color:T.muted, display:"flex", alignItems:"center", justifyContent:"center", transition:"all .14s" }}>
+                <i className={`ti ${icon}`} style={{ fontSize:20 }} />
+                {badge > 0 && (
+                  <span style={{ position:"absolute", top:4, right:4, fontSize:9, fontWeight:700, color:T.bg,
+                    background:color, borderRadius:10, padding:"0 4px", minWidth:14, textAlign:"center", ...MONO }}>{badge}</span>
+                )}
               </button>
-            ))}
-          </div>
-          {sdMode === "leadership" && ["yesterday","today","blockers"].map(k => (
-            <div key={k} style={{ marginBottom:16 }}>
-              <Lbl>{k}</Lbl>
-              {(standup?.leadership?.[k] || []).map((item, i) => (
-                <div key={i} style={{ display:"flex", gap:10, marginBottom:8 }}>
-                  <span style={{ color:{yesterday:T.muted,today:T.green,blockers:T.red}[k], fontSize:12, flexShrink:0, marginTop:1 }}>+</span>
-                  <span style={{ fontSize:13, color:T.text, lineHeight:1.6 }}>{item}</span>
-                </div>
-              ))}
-            </div>
-          ))}
-          {sdMode === "team" && (
-            <div>
-              {["yesterday","today"].map(k => (
-                <div key={k} style={{ marginBottom:16 }}>
-                  <Lbl>{k}</Lbl>
-                  {(standup?.team?.[k] || []).map((item, i) => (
-                    <div key={i} style={{ display:"flex", gap:10, marginBottom:8 }}>
-                      <span style={{ color:k==="today"?T.green:T.muted, fontSize:12, flexShrink:0, marginTop:1 }}>+</span>
-                      <span style={{ fontSize:13, color:T.text, lineHeight:1.6 }}>{item}</span>
-                    </div>
-                  ))}
-                </div>
-              ))}
-              <Lbl>delegate</Lbl>
-              {(standup?.team?.delegate || []).map((item, i) => (
-                <Blk key={i} style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"10px 14px" }}>
-                  <span style={{ color:T.amber, fontSize:13, flexShrink:0 }}>→</span>
-                  <span style={{ fontSize:13, color:T.text, lineHeight:1.5 }}>{item}</span>
-                </Blk>
-              ))}
-            </div>
-          )}
-          <div style={{ marginTop:10 }}>
-            <button style={{ fontSize:12, padding:"8px 16px",
-              background:sdMode==="leadership"?T.blueD:T.greenD,
-              border:`1px solid ${sdMode==="leadership"?T.blue:T.green}44`,
-              borderRadius:4, color:sdMode==="leadership"?T.blue:T.green, ...M }}>
-              $ draft {sdMode}-standup ↗
-            </button>
-          </div>
+            );
+          })}
         </div>
-
-      {/* Tasks (disabled — replaced by Open Loops) */}
-      {false && (
-        <div>
-          <div style={{ display:"flex", justifyContent:"space-between", flexWrap:"wrap", gap:8, marginBottom:12 }}>
-            <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
-              {["all","pending","P1","P2","P3"].map(f => (
-                <button key={f} onClick={() => setFilter(f)} style={{ fontSize:12, padding:"5px 12px",
-                  border:`1px solid ${filter===f?T.green:T.border}`, borderRadius:3,
-                  background:filter===f?T.greenD:"transparent", color:filter===f?T.green:T.muted, ...M }}>
-                  {f}
-                </button>
-              ))}
-            </div>
-            <button onClick={() => setNewTask(n => ({ ...n, show:true }))} style={{ fontSize:12, padding:"6px 14px",
-              background:T.greenD, border:`1px solid ${T.green}44`, borderRadius:3, color:T.green, ...M }}>
-              + new task
-            </button>
-          </div>
-
-          {newTask.show && (
-            <Blk style={{ marginBottom:10, background:T.bg }}>
-              <input style={{ width:"100%", marginBottom:8 }} placeholder="task description..."
-                value={newTask.text} onChange={e => setNewTask(n => ({ ...n, text:e.target.value }))}
-                onKeyDown={e => e.key === "Enter" && addTask()} />
-              <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-                <select style={{ flex:1 }} value={newTask.priority} onChange={e => setNewTask(n => ({ ...n, priority:e.target.value }))}>
-                  {["P1","P2","P3","P4"].map(p => <option key={p} value={p}>{p}</option>)}
-                </select>
-                <select style={{ flex:1 }} value={newTask.type} onChange={e => setNewTask(n => ({ ...n, type:e.target.value }))}>
-                  {["action","decision","delegate","followup","people"].map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
-                <input type="date" style={{ flex:1 }} value={newTask.due} onChange={e => setNewTask(n => ({ ...n, due:e.target.value }))} />
-                <button onClick={addTask} style={{ padding:"7px 16px", background:T.green, border:"none", borderRadius:3, color:T.bg, fontWeight:700, fontSize:12, ...M }}>add</button>
-                <button onClick={() => setNewTask({ show:false, text:"", priority:"P2", due:"", type:"action" })} style={{ padding:"7px 12px", background:"transparent", border:`1px solid ${T.border}`, borderRadius:3, color:T.dim, fontSize:12, ...M }}>esc</button>
-              </div>
-            </Blk>
-          )}
-
-          {taskList.length === 0
-            ? <Note>// no tasks matching filter</Note>
-            : taskList.map((task, i) => {
-                const status = ov[task.id] || task.status;
-                const [pc, pb] = prioC[task.priority] || prioC.P4;
-                const sc = stC[status] || T.dim;
-                const nxtLabel = { "Not Started":"→ start", "In Progress":"→ block", "Waiting on Others":"→ done", "Completed":"→ reopen" }[status] || "→ next";
-                return (
-                  <Blk key={task.id} style={{ opacity:status==="Completed"?0.4:1, marginBottom:6 }}>
-                    <div style={{ display:"flex", gap:10, alignItems:"flex-start" }}>
-                      <button onClick={() => cycleStatus(task.id, status)} style={{ marginTop:3, width:18, height:18, borderRadius:3,
-                        border:`1.5px solid ${status==="Completed"?T.green:T.borderB}`,
-                        background:status==="Completed"?T.greenD:"transparent",
-                        display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
-                        {status === "Completed" && <span style={{ fontSize:10, color:T.green }}>✓</span>}
-                      </button>
-                      <div style={{ flex:1, minWidth:0 }}>
-                        <div style={{ fontSize:14, fontWeight:500, color:status==="Completed"?T.dim:T.bright,
-                          textDecoration:status==="Completed"?"line-through":"none",
-                          marginBottom:6, lineHeight:1.4, wordBreak:"break-word" }}>{task.task}</div>
-                        <div style={{ display:"flex", gap:5, flexWrap:"wrap", alignItems:"center", marginBottom:4 }}>
-                          <Tag color={pc} bg={pb}>{task.priority}</Tag>
-                          <Tag color={sc} bg={sc+"15"}>{status}</Tag>
-                          {task.type && <Tag color={ttC[task.type]||T.dim} bg={(ttC[task.type]||T.dim)+"15"}>{task.type}</Tag>}
-                          {task.source && <SrcTag source={task.source} />}
-                          {task.owner && <span style={{ fontSize:11, color:T.muted, ...M }}>👤 {task.owner}</span>}
-                          {task.due && task.due !== "—" && <span style={{ fontSize:11, color:T.muted, ...M }}>📅 {task.due}</span>}
-                        </div>
-                        {task.priority_reason && <Note>// {task.priority_reason}</Note>}
-                      </div>
-                      <button onClick={() => cycleStatus(task.id, status)} style={{ fontSize:11, padding:"4px 10px",
-                        border:`1px solid ${T.border}`, borderRadius:3, background:"transparent",
-                        color:T.muted, flexShrink:0, whiteSpace:"nowrap", ...M }}>{nxtLabel}</button>
-                    </div>
-                  </Blk>
-                );
-              })
-          }
-        </div>
-      )}
-
-      {/* Schedule */}
-      {(
-        <div>
-          <Lbl>{dateStr} · IST</Lbl>
-          <div style={{ position:"relative" }}>
-            {(schedule || []).map((b, i) => {
-              const [h, m]   = (b.time || "0:0").split(":").map(Number);
-              const start    = new Date(); start.setHours(h, m, 0, 0);
-              const next     = schedule[i + 1];
-              const [nh, nm] = next ? (next.time || "0:0").split(":").map(Number) : [h+1, 0];
-              const end      = new Date(); end.setHours(nh, nm, 0, 0);
-              const isNow    = now >= start && now < end;
-              const isPast   = now >= end;
-              const c        = tyC[b.type] || T.muted;
-              return (
-                <div key={i} style={{ display:"flex", gap:13, alignItems:"stretch", opacity:isPast?0.45:1 }}>
-                  {/* time + rail */}
-                  <div style={{ width:46, flexShrink:0, textAlign:"right", paddingTop:13 }}>
-                    <div style={{ fontSize:12.5, fontWeight:600, color:isNow?T.green:T.muted, ...MONO }}>{b.time}</div>
-                  </div>
-                  <div style={{ display:"flex", flexDirection:"column", alignItems:"center", flexShrink:0 }}>
-                    <div style={{ width:30, height:30, borderRadius:9, marginTop:9, background:isNow?c:T.card,
-                      border:`1px solid ${isNow?c:T.border}`, display:"flex", alignItems:"center", justifyContent:"center",
-                      flexShrink:0, boxShadow:isNow?`0 0 0 4px ${c}22`:"none", zIndex:1 }}>
-                      <i className={`ti ${tyI[b.type]||"ti-clock"}`} style={{ fontSize:15, color:isNow?T.bg:c }} />
-                    </div>
-                    {i < schedule.length-1 && <div style={{ width:1.5, flex:1, background:T.border, minHeight:14 }} />}
-                  </div>
-                  {/* content */}
-                  <div className={isNow?"":"hovcard"} style={{ flex:1, minWidth:0, marginBottom:8, padding:"11px 14px",
-                    background:isNow?c+"12":T.card, border:`1px solid ${isNow?c+"44":T.border}`, borderRadius:10 }}>
-                    <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:b.notes?5:0 }}>
-                      <span style={{ flex:1, fontSize:14, fontWeight:600, color:isNow?T.bright:T.text, lineHeight:1.3 }}>{b.block}</span>
-                      {isNow && <span style={{ fontSize:9.5, fontWeight:700, color:T.bg, background:T.green, padding:"2px 7px", borderRadius:20, letterSpacing:".08em", ...MONO }}>NOW</span>}
-                    </div>
-                    {b.notes && <div style={{ fontSize:12.5, color:T.dim, lineHeight:1.55 }}>{b.notes}</div>}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
       </div>{/* end RIGHT */}
       </div>{/* end cockpit grid */}
 
