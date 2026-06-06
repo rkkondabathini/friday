@@ -3,17 +3,17 @@ import * as api from "./api";
 
 // ── Theme ──────────────────────────────────────────────────────
 const T = {
-  bg:"#080a0e", panel:"#0d1018", card:"#111520", border:"#1e2438", borderB:"#2a3350",
-  text:"#c8d4e8", dim:"#5a6a8a", muted:"#8898bb", bright:"#eef2ff",
-  green:"#00e87a", greenD:"#00e87a18",
-  blue:"#4d9ef7", blueD:"#4d9ef718",
-  amber:"#ffb347", amberD:"#ffb34718",
-  red:"#ff4f4f", redD:"#ff4f4f18",
-  purple:"#c07bff", purpleD:"#c07bff18",
-  cyan:"#38d9f5", cyanD:"#38d9f518",
-  slack:"#e8a838", slackD:"#e8a83818",
-  gmail:"#08da12", gmailD:"#08da1218",
-  cal:"#5b9cf6", calD:"#5b9cf618",
+  bg:"#0a0c10", panel:"#12151b", card:"#161a22", cardHi:"#1b212b", border:"#232b36", borderB:"#333d4c",
+  text:"#cdd4df", dim:"#5a6373", muted:"#828d9c", bright:"#f4f7fb",
+  green:"#37d399", greenD:"#37d39914",
+  blue:"#5f9bf5", blueD:"#5f9bf514",
+  amber:"#f2b34d", amberD:"#f2b34d14",
+  red:"#fb6a6a", redD:"#fb6a6a14",
+  purple:"#a98bf0", purpleD:"#a98bf014",
+  cyan:"#48c9e0", cyanD:"#48c9e014",
+  slack:"#d9a23f", slackD:"#d9a23f14",
+  gmail:"#e0683f", gmailD:"#e0683f14",
+  cal:"#5f9bf5", calD:"#5f9bf514",
 };
 
 const srcStyle = {
@@ -42,73 +42,83 @@ const SLASH_COMMANDS = [
   { cmd:"/draft",       desc:"Draft a reply to the most urgent email" },
 ];
 
-const mono = "'JetBrains Mono', monospace";
-const M    = { fontFamily: mono };
+const sans = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+const mono = "'JetBrains Mono', ui-monospace, monospace";
+const M    = { fontFamily: sans };          // body default — reads like a product
+const MONO = { fontFamily: mono };          // data: numbers, times, small labels
 
 const css = `
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 @import url('https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css');
 * { box-sizing: border-box; margin: 0; padding: 0 }
-body, #root { background: ${T.bg}; min-height: 100vh }
-::-webkit-scrollbar { width: 3px }
+body, #root { background: ${T.bg}; min-height: 100vh; font-family: ${sans};
+  -webkit-font-smoothing: antialiased; color: ${T.text}; letter-spacing: -0.01em; }
+::-webkit-scrollbar { width: 7px; height: 7px }
 ::-webkit-scrollbar-track { background: transparent }
-::-webkit-scrollbar-thumb { background: ${T.border}; border-radius: 2px }
+::-webkit-scrollbar-thumb { background: ${T.border}; border-radius: 4px }
+::-webkit-scrollbar-thumb:hover { background: ${T.borderB} }
 input, select, textarea {
-  background: ${T.card}; color: ${T.text};
-  border: 1px solid ${T.border}; border-radius: 4px;
-  padding: 8px 12px; font-size: 13px;
-  font-family: ${mono}; outline: none; transition: border .15s;
+  background: ${T.bg}; color: ${T.text};
+  border: 1px solid ${T.border}; border-radius: 8px;
+  padding: 10px 13px; font-size: 13.5px;
+  font-family: ${sans}; outline: none; transition: border .15s, box-shadow .15s;
 }
-input:focus, select:focus, textarea:focus { border-color: ${T.green} }
-button { cursor: pointer; font-family: ${mono} }
-a { color: ${T.cyan}; text-decoration: none }
-a:hover { opacity: .8 }
+input::placeholder { color: ${T.dim} }
+input:focus, select:focus, textarea:focus { border-color: ${T.green}; box-shadow: 0 0 0 3px ${T.green}1a }
+button { cursor: pointer; font-family: ${sans} }
+a { color: ${T.green}; text-decoration: none }
+a:hover { opacity: .82 }
 @keyframes spin    { from { transform: rotate(0)   } to { transform: rotate(360deg) } }
 @keyframes blink   { 0%,100% { opacity:1 } 50% { opacity:0 } }
 @keyframes fadeIn  { from { opacity:0; transform:translateY(-6px) } to { opacity:1; transform:translateY(0) } }
+@keyframes rise    { from { opacity:0; transform:translateY(8px) } to { opacity:1; transform:translateY(0) } }
 .spin   { animation: spin 1s linear infinite }
-.blink  { animation: blink 1s step-end infinite }
-.fadeIn { animation: fadeIn .12s ease }
+.blink  { animation: blink 1.1s step-end infinite }
+.fadeIn { animation: fadeIn .14s ease }
+.rise   { animation: rise .22s cubic-bezier(.2,.7,.3,1) both }
+.hovcard { transition: background .14s, border-color .14s, transform .14s }
+.hovcard:hover { background: ${T.cardHi}; border-color: ${T.borderB} }
 `;
 
 // ── Small components ───────────────────────────────────────────
 const Tag     = ({ children, color=T.muted, bg }) => (
-  <span style={{ fontSize:11, fontWeight:600, padding:"2px 8px", borderRadius:3,
-    border:`1px solid ${color}55`, color, background:bg||color+"18", ...M }}>{children}</span>
+  <span style={{ fontSize:10.5, fontWeight:600, padding:"2px 8px", borderRadius:20,
+    color, background:bg||color+"1f", letterSpacing:".01em", whiteSpace:"nowrap", ...M }}>{children}</span>
 );
 const SrcTag  = ({ source }) => {
   const s = srcStyle[source] || srcStyle.manual;
   return (
-    <span style={{ fontSize:11, fontWeight:700, padding:"2px 8px", borderRadius:3,
-      border:`1px solid ${s.color}55`, color:s.color, background:s.bg,
-      display:"inline-flex", alignItems:"center", gap:3, ...M }}>
+    <span style={{ fontSize:10.5, fontWeight:600, padding:"2px 8px", borderRadius:20,
+      color:s.color, background:s.color+"18",
+      display:"inline-flex", alignItems:"center", gap:4, ...M }}>
       <i className={`ti ${s.icon}`} style={{ fontSize:11 }} />{s.label}
     </span>
   );
 };
 const Blk     = ({ children, style={}, accent }) => (
-  <div style={{ background:T.card, border:`1px solid ${accent?accent+"55":T.border}`,
-    borderLeft:accent?`2px solid ${accent}`:`1px solid ${T.border}`,
-    borderRadius:5, padding:"12px 16px", marginBottom:8, ...style }}>{children}</div>
+  <div className="hovcard" style={{ background:T.card, border:`1px solid ${T.border}`,
+    borderLeft:accent?`2.5px solid ${accent}`:`1px solid ${T.border}`,
+    borderRadius:10, padding:"13px 16px", marginBottom:8, ...style }}>{children}</div>
 );
-const Lbl     = ({ children }) => (
-  <div style={{ fontSize:11, fontWeight:700, color:T.muted, letterSpacing:".1em",
-    textTransform:"uppercase", marginBottom:10, marginTop:2, ...M }}>
-    {children}
+const Lbl     = ({ children, right }) => (
+  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", margin:"4px 0 11px" }}>
+    <span style={{ fontSize:11, fontWeight:600, color:T.muted, letterSpacing:".14em",
+      textTransform:"uppercase", ...MONO }}>{children}</span>
+    {right}
   </div>
 );
 const Note    = ({ children }) => (
-  <div style={{ fontSize:12, color:T.muted, marginTop:5, lineHeight:1.6, ...M }}>{children}</div>
+  <div style={{ fontSize:12.5, color:T.dim, marginTop:5, lineHeight:1.6, ...M }}>{children}</div>
 );
 const SlackLnk = ({ url }) => url ? (
   <a href={url} target="_blank" rel="noopener noreferrer"
-    style={{ fontSize:11, color:T.slack, display:"inline-flex", alignItems:"center", gap:3, marginTop:5, ...M }}>
-    <i className="ti ti-brand-slack" style={{ fontSize:12 }} />open in slack →
+    style={{ fontSize:11.5, color:T.slack, display:"inline-flex", alignItems:"center", gap:4, marginTop:8, fontWeight:500, ...M }}>
+    <i className="ti ti-brand-slack" style={{ fontSize:13 }} />open in Slack <i className="ti ti-arrow-up-right" style={{ fontSize:12 }} />
   </a>
 ) : null;
 const Cursor  = () => (
-  <span className="blink" style={{ display:"inline-block", width:7, height:13,
-    background:T.green, marginLeft:2, verticalAlign:"middle" }} />
+  <span className="blink" style={{ display:"inline-block", width:6, height:15, borderRadius:1,
+    background:T.green, marginLeft:3, verticalAlign:"-2px" }} />
 );
 
 // ── XP Bar ─────────────────────────────────────────────────────
@@ -159,7 +169,7 @@ const SERVICES = [
 const ConnectBar = ({ conns, onConnect, onDisconnect }) => {
   const byProvider = Object.fromEntries((conns || []).map(c => [c.provider, c]));
   return (
-    <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:12 }}>
+    <div style={{ display:"flex", gap:7, flexWrap:"wrap", marginBottom:14 }}>
       {SERVICES.map(s => {
         const st        = byProvider[s.provider] || {};
         const connected = !!st.connected;
@@ -173,12 +183,12 @@ const ConnectBar = ({ conns, onConnect, onDisconnect }) => {
         return (
           <button key={s.key} title={title}
             onClick={() => connected ? onDisconnect(s.provider) : onConnect(s.provider)}
-            style={{ display:"inline-flex", alignItems:"center", gap:6, fontSize:12, padding:"7px 12px",
-              border:`1px solid ${connected ? c+"66" : T.border}`, borderRadius:5,
-              background:connected ? c+"14" : "transparent", color:c, ...M }}>
-            <i className={`ti ${s.icon}`} style={{ fontSize:14 }} />
-            {connected ? s.label : `connect ${s.label.toLowerCase()}`}
-            {connected && <span style={{ color:c, fontSize:11 }}>✓</span>}
+            style={{ display:"inline-flex", alignItems:"center", gap:6, fontSize:11.5, padding:"5px 11px", fontWeight:500,
+              border:`1px solid ${connected ? T.border : T.borderB}`, borderRadius:20,
+              background:connected ? T.card : "transparent", color:connected ? T.text : T.muted, ...M }}>
+            <span style={{ width:6, height:6, borderRadius:"50%", background:connected?c:T.dim,
+              boxShadow:connected?`0 0 6px ${c}99`:"none" }} />
+            {s.label}
             {!configured && <span style={{ color:T.dim, fontSize:10 }}>· setup</span>}
           </button>
         );
@@ -470,9 +480,13 @@ export default function App() {
     <div style={{ background:T.bg, height:"100vh", display:"flex", alignItems:"center", justifyContent:"center" }}>
       <style>{css}</style>
       <div style={{ textAlign:"center", ...M }}>
-        <div style={{ fontSize:22, fontWeight:700, color:T.green, marginBottom:6, letterSpacing:".2em" }}>FRIDAY</div>
-        <div style={{ fontSize:11, color:T.muted, marginBottom:20 }}>Focused Realtime Intelligence for Daily Accountability &amp; Yield</div>
-        <div style={{ fontSize:12, color:T.dim }}>initializing<span className="blink">_</span></div>
+        <div style={{ width:46, height:46, borderRadius:13, margin:"0 auto 16px", background:`linear-gradient(135deg, ${T.green}, ${T.cyan})`,
+          display:"flex", alignItems:"center", justifyContent:"center", boxShadow:`0 8px 30px ${T.green}44` }}>
+          <span style={{ fontSize:24, fontWeight:800, color:T.bg }}>F</span>
+        </div>
+        <div style={{ fontSize:20, fontWeight:700, color:T.bright, letterSpacing:".04em" }}>FRIDAY</div>
+        <div style={{ fontSize:11.5, color:T.muted, marginTop:6 }}>Focused Realtime Intelligence for Daily Accountability &amp; Yield</div>
+        <div style={{ fontSize:12, color:T.dim, marginTop:18 }}>initializing<span className="blink">_</span></div>
       </div>
     </div>
   );
@@ -481,8 +495,12 @@ export default function App() {
     <div style={{ background:T.bg, minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", padding:24 }}>
       <style>{css}</style>
       <div style={{ textAlign:"center", ...M, maxWidth:460, width:"100%" }}>
-        <div style={{ fontSize:22, fontWeight:700, color:T.green, marginBottom:6, letterSpacing:".2em" }}>FRIDAY</div>
-        <div style={{ fontSize:11, color:T.muted, marginBottom:24 }}>Connect your sources to generate your first briefing.</div>
+        <div style={{ width:46, height:46, borderRadius:13, margin:"0 auto 16px", background:`linear-gradient(135deg, ${T.green}, ${T.cyan})`,
+          display:"flex", alignItems:"center", justifyContent:"center", boxShadow:`0 8px 30px ${T.green}44` }}>
+          <span style={{ fontSize:24, fontWeight:800, color:T.bg }}>F</span>
+        </div>
+        <div style={{ fontSize:20, fontWeight:700, color:T.bright, letterSpacing:".04em", marginBottom:6 }}>FRIDAY</div>
+        <div style={{ fontSize:12, color:T.muted, marginBottom:24 }}>Connect your sources to generate your first briefing.</div>
         {banner && (
           <div style={{ fontSize:12, marginBottom:16, padding:"8px 12px", borderRadius:5,
             color:banner.kind==="ok"?T.green:T.red, background:(banner.kind==="ok"?T.green:T.red)+"14",
@@ -524,7 +542,7 @@ export default function App() {
   const dateStr = now.toLocaleDateString("en-IN", { weekday:"short", day:"2-digit", month:"short" });
 
   return (
-    <div style={{ background:T.bg, minHeight:"100vh", padding:16, paddingBottom:120, ...M }}>
+    <div style={{ background:T.bg, minHeight:"100vh", padding:"26px 20px 120px", maxWidth:880, margin:"0 auto", ...M }}>
       <style>{css}</style>
 
       {/* Floating chat */}
@@ -606,10 +624,11 @@ export default function App() {
           </div>
         )}
         <button onClick={() => setChatOpen(o => !o)} style={{ width:54, height:54, borderRadius:"50%",
-          background:chatOpen?T.card:T.bg, border:`2px solid ${chatOpen?T.borderB:T.green}`,
-          color:chatOpen?T.muted:T.green, fontSize:24, display:"flex", alignItems:"center", justifyContent:"center",
-          boxShadow:chatOpen?"none":`0 0 0 1px ${T.green}33, 0 4px 24px ${T.green}22` }}>
-          <i className={`ti ${chatOpen ? "ti-x" : "ti-message-circle-2"}`} style={{ fontSize:24, lineHeight:1 }} />
+          background:chatOpen?T.card:`linear-gradient(135deg, ${T.green}, ${T.cyan})`,
+          border:chatOpen?`1px solid ${T.borderB}`:"none",
+          color:chatOpen?T.muted:T.bg, display:"flex", alignItems:"center", justifyContent:"center",
+          boxShadow:chatOpen?"none":`0 6px 22px ${T.green}55` }}>
+          <i className={`ti ${chatOpen ? "ti-x" : "ti-sparkles"}`} style={{ fontSize:23, lineHeight:1 }} />
         </button>
         {!chatOpen && (
           <div style={{ position:"absolute", bottom:60, right:0, fontSize:9, color:T.dim,
@@ -618,29 +637,39 @@ export default function App() {
         )}
       </div>
 
-      {/* Header */}
-      <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:14, flexWrap:"wrap", gap:8 }}>
-        <div>
-          <div style={{ fontSize:11, color:T.dim, marginBottom:4 }}>
-            <span style={{ color:T.green, fontWeight:700, letterSpacing:".2em" }}>FRIDAY</span>
-            <span style={{ color:T.dim, margin:"0 6px" }}>/</span>
-            <span style={{ color:T.muted }}>friday --session {dateStr} {timeStr}</span>
+      {/* Header — wordmark + sync */}
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:22 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          <div style={{ width:30, height:30, borderRadius:9, background:`linear-gradient(135deg, ${T.green}, ${T.cyan})`,
+            display:"flex", alignItems:"center", justifyContent:"center", boxShadow:`0 4px 16px ${T.green}33` }}>
+            <span style={{ fontSize:15, fontWeight:800, color:T.bg }}>F</span>
           </div>
-          <div style={{ fontSize:15, fontWeight:600, color:T.bright, lineHeight:1.4 }}>
-            {summary?.focus_of_day || "ready"}<Cursor />
+          <div>
+            <div style={{ fontSize:15, fontWeight:700, color:T.bright, letterSpacing:".02em", lineHeight:1 }}>FRIDAY</div>
+            <div style={{ fontSize:10.5, color:T.dim, marginTop:2, ...MONO }}>{dateStr} · {timeStr} IST</div>
           </div>
-          {summary?.risk_flag && (
-            <div style={{ fontSize:12, color:T.red, marginTop:5, display:"flex", alignItems:"flex-start", gap:6 }}>
-              <i className="ti ti-alert-triangle" style={{ fontSize:13, marginTop:1, flexShrink:0 }} />
-              {summary.risk_flag}
-            </div>
-          )}
         </div>
-        <button onClick={doSync} disabled={syncing} style={{ fontSize:11, padding:"7px 14px",
-          background:"transparent", border:`1px solid ${T.border}`, borderRadius:4, color:T.muted, ...M }}>
-          <i className={`ti ti-refresh ${syncing ? "spin" : ""}`} style={{ fontSize:12, verticalAlign:"-2px", marginRight:4 }} />
-          {syncing ? "syncing..." : "sync"}
+        <button onClick={doSync} disabled={syncing} style={{ fontSize:12, padding:"8px 16px", fontWeight:600,
+          background:T.green, border:"none", borderRadius:8, color:T.bg, display:"inline-flex", alignItems:"center", gap:6,
+          opacity:syncing?0.6:1, ...M }}>
+          <i className={`ti ti-refresh ${syncing ? "spin" : ""}`} style={{ fontSize:13 }} />
+          {syncing ? "syncing…" : "Sync"}
         </button>
+      </div>
+
+      {/* Hero — the one thing that matters today */}
+      <div style={{ marginBottom:20 }}>
+        <div style={{ fontSize:10.5, fontWeight:600, color:T.green, letterSpacing:".16em", marginBottom:8, ...MONO }}>FOCUS TODAY</div>
+        <div style={{ fontSize:22, fontWeight:600, color:T.bright, lineHeight:1.35, letterSpacing:"-0.02em" }}>
+          {summary?.focus_of_day || "Ready when you are."}{!summary?.focus_of_day && <Cursor />}
+        </div>
+        {summary?.risk_flag && (
+          <div style={{ fontSize:12.5, color:T.red, marginTop:12, display:"flex", alignItems:"flex-start", gap:8,
+            background:T.redD, border:`1px solid ${T.red}33`, borderRadius:9, padding:"10px 13px", lineHeight:1.5 }}>
+            <i className="ti ti-alert-triangle" style={{ fontSize:14, marginTop:1, flexShrink:0 }} />
+            <span><b style={{ fontWeight:600 }}>Risk · </b>{summary.risk_flag}</span>
+          </div>
+        )}
       </div>
 
       {banner && (
@@ -668,29 +697,34 @@ export default function App() {
       <ConnectBar conns={conns} onConnect={doConnect} onDisconnect={doDisconnect} />
 
       {/* Metrics — what's actually on you (auto-detected) */}
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8, marginBottom:16 }}>
-        {[[sOpen,"slack open",T.slack,"ti-brand-slack"],
-          [eOpen,"email open",T.cal,"ti-mail"],
-          [meets,"meetings",T.green,"ti-calendar-event"],
-          [fups,"follow-ups",T.amber,"ti-user-up"]]
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:10, marginBottom:20 }}>
+        {[[sOpen,"Slack open",T.slack,"ti-brand-slack"],
+          [eOpen,"Email open",T.cal,"ti-mail"],
+          [meets,"Meetings",T.green,"ti-calendar-event"],
+          [fups,"Follow-ups",T.amber,"ti-user-up"]]
           .map(([v,l,c,ic]) => (
-            <div key={l} style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:8, padding:"12px 14px" }}>
-              <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                <i className={`ti ${ic}`} style={{ fontSize:13, color:c }} />
-                <span style={{ fontSize:22, fontWeight:700, color:T.bright, ...M }}>{v}</span>
+            <div key={l} className="hovcard" style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:"14px 15px" }}>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                <span style={{ fontSize:27, fontWeight:700, color:v>0?T.bright:T.dim, letterSpacing:"-0.03em", ...MONO }}>{v}</span>
+                <span style={{ width:26, height:26, borderRadius:8, background:c+"1f", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                  <i className={`ti ${ic}`} style={{ fontSize:14, color:c }} />
+                </span>
               </div>
-              <div style={{ fontSize:10, color:T.dim, marginTop:3, letterSpacing:".04em", ...M }}>{l}</div>
+              <div style={{ fontSize:11.5, color:T.muted, marginTop:6 }}>{l}</div>
             </div>
           ))}
       </div>
 
       {/* Tabs */}
-      <div style={{ display:"flex", gap:2, marginBottom:16, background:T.panel, borderRadius:8, padding:3, border:`1px solid ${T.border}` }}>
+      <div style={{ display:"flex", gap:3, marginBottom:20, background:T.panel, borderRadius:11, padding:4, border:`1px solid ${T.border}` }}>
         {["briefing","loops","standup","schedule"].map(t => (
-          <button key={t} onClick={() => setTab(t)} style={{ flex:1, fontSize:12.5, padding:"9px", border:"none",
-            background:tab===t?T.card:"transparent", color:tab===t?T.green:T.muted, borderRadius:6, transition:"all .12s",
-            fontWeight:tab===t?600:400, ...M }}>
-            {t === "loops" ? `loops${sOpen+mOpen ? ` · ${sOpen+mOpen}` : ""}` : t}
+          <button key={t} onClick={() => setTab(t)} style={{ flex:1, fontSize:13, padding:"10px", border:"none",
+            background:tab===t?T.card:"transparent", color:tab===t?T.bright:T.muted, borderRadius:8, transition:"all .14s",
+            fontWeight:tab===t?600:500, textTransform:"capitalize",
+            boxShadow:tab===t?`0 1px 3px rgba(0,0,0,.3)`:"none", ...M }}>
+            {t === "loops" && sOpen+mOpen>0
+              ? <>loops <span style={{ color:T.green, fontWeight:700 }}>{sOpen+mOpen}</span></>
+              : t}
           </button>
         ))}
       </div>
@@ -1032,73 +1066,77 @@ export default function App() {
       {/* ── Schedule ── */}
       {tab === "schedule" && (
         <div>
-          <Lbl>today {dateStr} · IST</Lbl>
-          {(schedule || []).map((b, i) => {
-            const [h, m]   = (b.time || "0:0").split(":").map(Number);
-            const start    = new Date(); start.setHours(h, m, 0, 0);
-            const next     = schedule[i + 1];
-            const [nh, nm] = next ? (next.time || "0:0").split(":").map(Number) : [h+1, 0];
-            const end      = new Date(); end.setHours(nh, nm, 0, 0);
-            const isNow    = now >= start && now < end;
-            const isPast   = now >= end;
-            return (
-              <div key={i} style={{ display:"flex", gap:12, alignItems:"flex-start",
-                padding:isNow?"10px":"10px 0", marginBottom:2,
-                borderBottom:`1px solid ${T.border}44`, opacity:isPast?0.4:1,
-                background:isNow?T.green+"0a":"transparent",
-                borderRadius:isNow?"6px":"0", transition:"all .2s" }}>
-                <div style={{ width:52, flexShrink:0 }}>
-                  <div style={{ fontSize:13, fontWeight:700, color:isNow?T.green:isPast?T.dim:T.cyan, ...M }}>{b.time}</div>
-                  {isNow && <div style={{ fontSize:9, color:T.green, letterSpacing:".1em", marginTop:2, ...M }}>NOW</div>}
+          <Lbl>{dateStr} · IST</Lbl>
+          <div style={{ position:"relative" }}>
+            {(schedule || []).map((b, i) => {
+              const [h, m]   = (b.time || "0:0").split(":").map(Number);
+              const start    = new Date(); start.setHours(h, m, 0, 0);
+              const next     = schedule[i + 1];
+              const [nh, nm] = next ? (next.time || "0:0").split(":").map(Number) : [h+1, 0];
+              const end      = new Date(); end.setHours(nh, nm, 0, 0);
+              const isNow    = now >= start && now < end;
+              const isPast   = now >= end;
+              const c        = tyC[b.type] || T.muted;
+              return (
+                <div key={i} style={{ display:"flex", gap:13, alignItems:"stretch", opacity:isPast?0.45:1 }}>
+                  {/* time + rail */}
+                  <div style={{ width:46, flexShrink:0, textAlign:"right", paddingTop:13 }}>
+                    <div style={{ fontSize:12.5, fontWeight:600, color:isNow?T.green:T.muted, ...MONO }}>{b.time}</div>
+                  </div>
+                  <div style={{ display:"flex", flexDirection:"column", alignItems:"center", flexShrink:0 }}>
+                    <div style={{ width:30, height:30, borderRadius:9, marginTop:9, background:isNow?c:T.card,
+                      border:`1px solid ${isNow?c:T.border}`, display:"flex", alignItems:"center", justifyContent:"center",
+                      flexShrink:0, boxShadow:isNow?`0 0 0 4px ${c}22`:"none", zIndex:1 }}>
+                      <i className={`ti ${tyI[b.type]||"ti-clock"}`} style={{ fontSize:15, color:isNow?T.bg:c }} />
+                    </div>
+                    {i < schedule.length-1 && <div style={{ width:1.5, flex:1, background:T.border, minHeight:14 }} />}
+                  </div>
+                  {/* content */}
+                  <div className={isNow?"":"hovcard"} style={{ flex:1, minWidth:0, marginBottom:8, padding:"11px 14px",
+                    background:isNow?c+"12":T.card, border:`1px solid ${isNow?c+"44":T.border}`, borderRadius:10 }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:b.notes?5:0 }}>
+                      <span style={{ flex:1, fontSize:14, fontWeight:600, color:isNow?T.bright:T.text, lineHeight:1.3 }}>{b.block}</span>
+                      {isNow && <span style={{ fontSize:9.5, fontWeight:700, color:T.bg, background:T.green, padding:"2px 7px", borderRadius:20, letterSpacing:".08em", ...MONO }}>NOW</span>}
+                    </div>
+                    {b.notes && <div style={{ fontSize:12.5, color:T.dim, lineHeight:1.55 }}>{b.notes}</div>}
+                  </div>
                 </div>
-                <div style={{ width:28, height:28, borderRadius:4,
-                  background:(tyC[b.type]||T.dim)+(isNow?"33":"18"),
-                  display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
-                  <i className={`ti ${tyI[b.type]||"ti-clock"}`} style={{ fontSize:14, color:tyC[b.type]||T.dim }} />
-                </div>
-                <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontSize:14, fontWeight:600, color:isNow?T.bright:isPast?T.muted:T.text, lineHeight:1.3, marginBottom:4 }}>{b.block}</div>
-                  {b.notes && <div style={{ fontSize:12, color:isNow?T.muted:T.dim, lineHeight:1.6, ...M }}>{b.notes}</div>}
-                </div>
-                <Tag color={tyC[b.type]||T.dim}>{(b.type||"").replace("_"," ")}</Tag>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       )}
 
       {/* Footer */}
-      <div style={{ marginTop:16, paddingTop:10, borderTop:`1px solid ${T.border}`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-        <span style={{ fontSize:10, color:T.dim, ...M }}>
-          FRIDAY v1.0 · {lastSaved ? `synced ${lastSaved.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})}` : ""}
-        </span>
-        <span style={{ display:"flex", gap:12, alignItems:"center" }}>
-          {usage && (
-            <span title={`Today's real Claude usage (from your subscription).\n${usage.calls} call${usage.calls===1?"":"s"} · ${usage.tokens.toLocaleString()} tokens · ~$${usage.cost.toFixed(2)} equiv.\nAuto-briefings: ${usage.autoGens}/${usage.autoCap} (cap). ~15.6k tokens/call is fixed Claude Code overhead.`}
-              style={{ fontSize:10, display:"inline-flex", alignItems:"center", gap:4, ...M,
-                color: usage.cost > 3 ? T.red : usage.cost > 1 ? T.amber : T.green }}>
-              <i className="ti ti-bolt" style={{ fontSize:12 }} />
-              {usage.calls} · {usage.tokens >= 1000 ? (usage.tokens/1000).toFixed(0)+"k" : usage.tokens} tok · ${usage.cost.toFixed(2)}
-              <span style={{ color:T.dim }}>· {usage.autoGens}/{usage.autoCap}</span>
-            </span>
-          )}
+      <div style={{ marginTop:24, paddingTop:14, borderTop:`1px solid ${T.border}`, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10 }}>
+        <span style={{ display:"flex", gap:14, alignItems:"center" }}>
           <button onClick={() => setShowDirectives(true)} title="Standing priorities FRIDAY always keeps in mind"
-            style={{ fontSize:10, color:T.amber, background:"transparent", border:"none", display:"inline-flex", alignItems:"center", gap:4, ...M }}>
-            <i className="ti ti-flag" style={{ fontSize:12 }} />{directives.length} priorities
+            style={{ fontSize:11, color:T.muted, background:"transparent", border:"none", display:"inline-flex", alignItems:"center", gap:5, ...M }}>
+            <i className="ti ti-flag-3" style={{ fontSize:13, color:T.amber }} />{directives.length} priorities
           </button>
           {memStats?.total > 0 && (
             <button onClick={() => profile && setShowProfile(true)} title={profile ? "View learned profile" : "Items FRIDAY has learned"}
-              style={{ fontSize:10, color:T.purple, background:"transparent", border:"none", display:"inline-flex", alignItems:"center", gap:4, cursor:profile?"pointer":"default", ...M }}>
-              <i className="ti ti-brain" style={{ fontSize:12 }} />{memStats.total} learned{profile ? " · profile" : ""}
+              style={{ fontSize:11, color:T.muted, background:"transparent", border:"none", display:"inline-flex", alignItems:"center", gap:5, cursor:profile?"pointer":"default", ...M }}>
+              <i className="ti ti-brain" style={{ fontSize:13, color:T.purple }} />{memStats.total} learned{profile ? " · profile" : ""}
             </button>
           )}
           {conns.some(c => c.provider === "google" && c.connected) && (
             <button onClick={openMemorySheet} title="Open FRIDAY's memory in Google Sheets"
-              style={{ fontSize:10, color:T.green, background:"transparent", border:"none", display:"inline-flex", alignItems:"center", gap:4, ...M }}>
-              <i className="ti ti-table" style={{ fontSize:12 }} />memory sheet ↗
+              style={{ fontSize:11, color:T.muted, background:"transparent", border:"none", display:"inline-flex", alignItems:"center", gap:5, ...M }}>
+              <i className="ti ti-table" style={{ fontSize:13, color:T.green }} />memory sheet
             </button>
           )}
-          <span style={{ fontSize:10, color:T.dim, ...M }}>⌘K · type / for commands</span>
+        </span>
+        <span style={{ display:"flex", gap:14, alignItems:"center" }}>
+          {usage && (
+            <span title={`Today's real Claude usage (from your subscription).\n${usage.calls} call${usage.calls===1?"":"s"} · ${usage.tokens.toLocaleString()} tokens · ~$${usage.cost.toFixed(2)} equiv.\nAuto-briefings: ${usage.autoGens}/${usage.autoCap} (cap). ~15.6k tokens/call is fixed Claude Code overhead.`}
+              style={{ fontSize:10.5, display:"inline-flex", alignItems:"center", gap:5, ...MONO,
+                color: usage.cost > 3 ? T.red : usage.cost > 1 ? T.amber : T.muted }}>
+              <i className="ti ti-bolt" style={{ fontSize:12, color: usage.cost > 1 ? "currentColor" : T.green }} />
+              {usage.tokens >= 1000 ? (usage.tokens/1000).toFixed(0)+"k" : usage.tokens} · ${usage.cost.toFixed(2)} · {usage.autoGens}/{usage.autoCap}
+            </span>
+          )}
+          <span style={{ fontSize:10.5, color:T.dim, ...M }}>{lastSaved ? `synced ${lastSaved.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})}` : ""} · ⌘K</span>
         </span>
       </div>
 
