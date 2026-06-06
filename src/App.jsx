@@ -120,6 +120,39 @@ const Cursor  = () => (
   <span className="blink" style={{ display:"inline-block", width:6, height:15, borderRadius:1,
     background:T.green, marginLeft:3, verticalAlign:"-2px" }} />
 );
+// A framed dashboard panel with a header (title, icon, optional count + action).
+const Panel = ({ title, icon, accent=T.muted, count, action, children, bodyStyle={}, style={} }) => (
+  <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"15px 17px", ...style }}>
+    <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:13 }}>
+      {icon && <i className={`ti ${icon}`} style={{ fontSize:15, color:accent }} />}
+      <span style={{ fontSize:11.5, fontWeight:600, color:T.muted, letterSpacing:".11em", textTransform:"uppercase", ...MONO }}>{title}</span>
+      {count != null && count !== 0 && (
+        <span style={{ fontSize:10.5, fontWeight:700, color:accent, background:accent+"22", borderRadius:20, padding:"1px 8px", ...MONO }}>{count}</span>
+      )}
+      <span style={{ flex:1 }} />
+      {action}
+    </div>
+    <div style={bodyStyle}>{children}</div>
+  </div>
+);
+// Small circular focus/productivity score.
+const FocusScore = ({ score }) => {
+  const c = score >= 70 ? T.green : score >= 40 ? T.amber : T.red;
+  const r = 17, circ = 2 * Math.PI * r;
+  return (
+    <div style={{ display:"inline-flex", alignItems:"center", gap:9, background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:"6px 13px 6px 8px" }}>
+      <svg width="42" height="42" style={{ transform:"rotate(-90deg)" }}>
+        <circle cx="21" cy="21" r={r} fill="none" stroke={T.border} strokeWidth="4" />
+        <circle cx="21" cy="21" r={r} fill="none" stroke={c} strokeWidth="4" strokeLinecap="round"
+          strokeDasharray={circ} strokeDashoffset={circ * (1 - score / 100)} style={{ transition:"stroke-dashoffset .6s ease" }} />
+      </svg>
+      <div style={{ lineHeight:1.1 }}>
+        <div style={{ fontSize:16, fontWeight:700, color:T.bright, ...MONO }}>{score}<span style={{ fontSize:10, color:T.dim }}>%</span></div>
+        <div style={{ fontSize:9.5, color:T.dim, letterSpacing:".06em", textTransform:"uppercase", ...MONO }}>focus</div>
+      </div>
+    </div>
+  );
+};
 
 // ── XP Bar ─────────────────────────────────────────────────────
 const XPBar = ({ tasks, overrides }) => {
@@ -537,12 +570,16 @@ export default function App() {
   const sOpen = loops?.summary?.slackOpen ?? slackOpen.length;
   const eOpen = loops?.summary?.emailOpen ?? emailOpen.length;
   const mOpen = manualOpen.length;
+  // Focus score = how CLEAR you are. 100 when nothing's on you; each open Slack tag
+  // or captured item lowers it, and clearing them pushes it back up. Email is excluded
+  // (low-signal by design) so it never unfairly tanks the score. Meant to motivate.
+  const focusScore = loops ? Math.max(8, Math.min(100, 100 - (sOpen + mOpen) * 9)) : null;
   const now   = new Date();
   const timeStr = now.toLocaleTimeString("en-IN", { hour:"2-digit", minute:"2-digit", hour12:false });
   const dateStr = now.toLocaleDateString("en-IN", { weekday:"short", day:"2-digit", month:"short" });
 
   return (
-    <div style={{ background:T.bg, minHeight:"100vh", padding:"26px 20px 120px", maxWidth:880, margin:"0 auto", ...M }}>
+    <div style={{ background:T.bg, minHeight:"100vh", padding:"24px clamp(16px,4vw,40px) 110px", width:"100%", maxWidth:1480, margin:"0 auto", ...M }}>
       <style>{css}</style>
 
       {/* Floating chat */}
@@ -696,41 +733,29 @@ export default function App() {
 
       <ConnectBar conns={conns} onConnect={doConnect} onDisconnect={doDisconnect} />
 
-      {/* Metrics — what's actually on you (auto-detected) */}
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:10, marginBottom:20 }}>
-        {[[sOpen,"Slack open",T.slack,"ti-brand-slack"],
-          [eOpen,"Email open",T.cal,"ti-mail"],
+      {/* Pulse strip — compact indicators + focus score */}
+      <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center", marginBottom:18 }}>
+        {[[sOpen,"Slack",T.slack,"ti-brand-slack"],
+          [eOpen,"Email",T.cal,"ti-mail"],
           [meets,"Meetings",T.green,"ti-calendar-event"],
           [fups,"Follow-ups",T.amber,"ti-user-up"]]
           .map(([v,l,c,ic]) => (
-            <div key={l} className="hovcard" style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:"14px 15px" }}>
-              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-                <span style={{ fontSize:27, fontWeight:700, color:v>0?T.bright:T.dim, letterSpacing:"-0.03em", ...MONO }}>{v}</span>
-                <span style={{ width:26, height:26, borderRadius:8, background:c+"1f", display:"flex", alignItems:"center", justifyContent:"center" }}>
-                  <i className={`ti ${ic}`} style={{ fontSize:14, color:c }} />
-                </span>
-              </div>
-              <div style={{ fontSize:11.5, color:T.muted, marginTop:6 }}>{l}</div>
+            <div key={l} className="hovcard" style={{ display:"inline-flex", alignItems:"center", gap:8,
+              background:T.card, border:`1px solid ${T.border}`, borderRadius:11, padding:"8px 13px" }}>
+              <i className={`ti ${ic}`} style={{ fontSize:14, color:c }} />
+              <span style={{ fontSize:17, fontWeight:700, color:v>0?T.bright:T.dim, letterSpacing:"-0.03em", ...MONO }}>{v}</span>
+              <span style={{ fontSize:11.5, color:T.muted }}>{l}</span>
             </div>
           ))}
+        <span style={{ flex:1 }} />
+        {focusScore != null && <FocusScore score={focusScore} />}
       </div>
 
-      {/* Tabs */}
-      <div style={{ display:"flex", gap:3, marginBottom:20, background:T.panel, borderRadius:11, padding:4, border:`1px solid ${T.border}` }}>
-        {["briefing","loops","standup","schedule"].map(t => (
-          <button key={t} onClick={() => setTab(t)} style={{ flex:1, fontSize:13, padding:"10px", border:"none",
-            background:tab===t?T.card:"transparent", color:tab===t?T.bright:T.muted, borderRadius:8, transition:"all .14s",
-            fontWeight:tab===t?600:500, textTransform:"capitalize",
-            boxShadow:tab===t?`0 1px 3px rgba(0,0,0,.3)`:"none", ...M }}>
-            {t === "loops" && sOpen+mOpen>0
-              ? <>loops <span style={{ color:T.green, fontWeight:700 }}>{sOpen+mOpen}</span></>
-              : t}
-          </button>
-        ))}
-      </div>
+      {/* ── Cockpit: everything on one screen ── */}
+      <div style={{ display:"grid", gridTemplateColumns:"minmax(0,1.55fr) minmax(0,1fr)", gap:16, alignItems:"start" }}>
 
-      {/* ── Briefing ── */}
-      {tab === "briefing" && (
+      {/* LEFT — what needs you */}
+      <div style={{ display:"flex", flexDirection:"column", gap:16, minWidth:0 }}>
         <div>
           {learn && learn.title && (
             <div style={{ background:`linear-gradient(135deg, ${T.purpleD}, ${T.cyanD})`,
@@ -819,10 +844,10 @@ export default function App() {
             </Blk>
           ))}
         </div>
-      )}
+      </div>
 
-      {/* ── Open Loops ── */}
-      {tab === "loops" && (
+      {/* RIGHT — at a glance */}
+      <div style={{ display:"flex", flexDirection:"column", gap:16, minWidth:0 }}>
         <div>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
             <div style={{ fontSize:12, color:T.muted, lineHeight:1.6, ...M }}>
@@ -925,11 +950,9 @@ export default function App() {
             </>
           )}
         </div>
-      )}
 
-      {/* ── Standup ── */}
-      {tab === "standup" && (
-        <div>
+      {/* Standup */}
+      <div>
           <div style={{ display:"flex", gap:6, marginBottom:14 }}>
             {["leadership", "team"].map(m => (
               <button key={m} onClick={() => setSdMode(m)} style={{ fontSize:12, padding:"7px 16px",
@@ -982,10 +1005,9 @@ export default function App() {
             </button>
           </div>
         </div>
-      )}
 
-      {/* ── Tasks ── */}
-      {tab === "tasks" && (
+      {/* Tasks (disabled — replaced by Open Loops) */}
+      {false && (
         <div>
           <div style={{ display:"flex", justifyContent:"space-between", flexWrap:"wrap", gap:8, marginBottom:12 }}>
             <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
@@ -1063,8 +1085,8 @@ export default function App() {
         </div>
       )}
 
-      {/* ── Schedule ── */}
-      {tab === "schedule" && (
+      {/* Schedule */}
+      {(
         <div>
           <Lbl>{dateStr} · IST</Lbl>
           <div style={{ position:"relative" }}>
@@ -1106,6 +1128,8 @@ export default function App() {
           </div>
         </div>
       )}
+      </div>{/* end RIGHT */}
+      </div>{/* end cockpit grid */}
 
       {/* Footer */}
       <div style={{ marginTop:24, paddingTop:14, borderTop:`1px solid ${T.border}`, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10 }}>
