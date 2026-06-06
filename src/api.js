@@ -85,6 +85,19 @@ export const doneManualLoop = (id) =>
 export const deleteManualLoop = (id) =>
   req("DELETE", `/api/loops/manual/${id}`);
 
+// ── Feedback (product ideas/fixes, collated over time) ─────────
+export const getFeedback = () =>
+  req("GET", "/api/feedback");
+
+export const addFeedback = (text) =>
+  req("POST", "/api/feedback", { text });
+
+export const doneFeedback = (id, status) =>
+  req("POST", `/api/feedback/${id}/done`, { status });
+
+export const deleteFeedback = (id) =>
+  req("DELETE", `/api/feedback/${id}`);
+
 export const getOutboxJob = (id) =>
   req("GET", `/api/outbox/${id}`);
 

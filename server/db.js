@@ -76,6 +76,13 @@ db.exec(`
     created_at TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    text TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    created_at TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS manual_loops (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     text TEXT NOT NULL,
@@ -278,6 +285,18 @@ const getDirectives = () =>
 const deleteDirective = (id) =>
   db.prepare("DELETE FROM directives WHERE id = ?").run(id);
 
+// ── Feedback (product ideas/fixes for FRIDAY, collated over time) ──────────────
+const addFeedback = (text) => {
+  const info = db.prepare("INSERT INTO feedback (text, created_at) VALUES (?, ?)").run(text, new Date().toISOString());
+  return info.lastInsertRowid;
+};
+const getFeedback = () =>
+  db.prepare("SELECT id, text, status, created_at FROM feedback ORDER BY (status='open') DESC, id DESC").all();
+const setFeedbackStatus = (id, status) =>
+  db.prepare("UPDATE feedback SET status = ? WHERE id = ?").run(status, id);
+const deleteFeedback = (id) =>
+  db.prepare("DELETE FROM feedback WHERE id = ?").run(id);
+
 // ── Manual loops (things on you that have no digital trace — in-person, calls) ──
 const addManualLoop = (text) => {
   const info = db.prepare("INSERT INTO manual_loops (text, created_at) VALUES (?, ?)")
@@ -412,4 +431,5 @@ module.exports = {
   markOutboxDone, markOutboxFailed, bumpOutboxAttempt, getOutboxJob, getOutbox,
   addUsage, getUsage,
   addManualLoop, getManualLoops, closeManualLoop, reopenManualLoop, deleteManualLoop,
+  addFeedback, getFeedback, setFeedbackStatus, deleteFeedback,
 };

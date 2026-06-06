@@ -40,6 +40,7 @@ const SLASH_COMMANDS = [
   { cmd:"/eod",         desc:"End of day — what's left, what carries forward" },
   { cmd:"/week",        desc:"Weekly review — wins, risks, next week priorities" },
   { cmd:"/draft",       desc:"Draft a reply to the most urgent email" },
+  { cmd:"/feedback",    desc:"Log an idea or fix for FRIDAY — collated for later (no AI call)" },
 ];
 
 const sans = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
@@ -258,6 +259,9 @@ export default function App() {
   const [learnRead, setLearnRead] = useState(() => { try { return localStorage.getItem("friday_learn_read"); } catch { return null; } });
   const [rightTab, setRightTab] = useState("loops");   // which right-panel section is shown
   const [showAll,  setShowAll]  = useState({});         // per-section "expanded" flag
+  const [feedback, setFeedback] = useState([]);
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [newFeedback, setNewFeedback] = useState("");
   const [banner,   setBanner]   = useState(null);
   const [sheetUrl, setSheetUrl] = useState(null);
   const [memStats, setMemStats] = useState(null);
@@ -297,6 +301,7 @@ export default function App() {
     try { const st = await api.getStatus(); setStatus(st); } catch {}
     try { const u = await api.getUsage(); setUsage(u); } catch {}
     try { const lp = await api.getOpenLoops(); setLoops(lp); } catch {}
+    try { const fb = await api.getFeedback(); setFeedback(fb.feedback || []); } catch {}
   };
 
   const addDirective = async () => {
@@ -475,6 +480,26 @@ export default function App() {
   const sendChat = async () => {
     const msg = chatInput.trim();
     if (!msg || chatLoad) return;
+
+    // /feedback — capture a product idea/fix. Stored locally, no AI call (free).
+    if (/^\/feedback\b/i.test(msg)) {
+      const text = msg.replace(/^\/feedback\b/i, "").trim();
+      setChatInput(""); setSlashRes([]);
+      setChatHist(h => [...h, { role: "user", content: msg }]);
+      if (!text) {
+        setChatHist(h => [...h, { role: "assistant", content: "Add your note after /feedback — e.g. `/feedback let me reorder the schedule blocks`." }]);
+        return;
+      }
+      try {
+        const r = await api.addFeedback(text);
+        setFeedback(r.feedback || []);
+        setChatHist(h => [...h, { role: "assistant", content: `Logged ✓ — that's ${(r.feedback || []).length} idea${(r.feedback||[]).length===1?"":"s"} collated. See the full list from the "feedback" link in the footer.` }]);
+      } catch {
+        setChatHist(h => [...h, { role: "assistant", content: "couldn't save that — server unreachable." }]);
+      }
+      return;
+    }
+
     setChatInput(""); setSlashRes([]);
     const h = [...chatHist, { role: "user", content: msg }];
     setChatHist(h); setChatLoad(true);
@@ -1131,6 +1156,10 @@ export default function App() {
             style={{ fontSize:11, color:T.muted, background:"transparent", border:"none", display:"inline-flex", alignItems:"center", gap:5, ...M }}>
             <i className="ti ti-flag-3" style={{ fontSize:13, color:T.amber }} />{directives.length} priorities
           </button>
+          <button onClick={() => setShowFeedback(true)} title="Ideas & fixes you've logged for FRIDAY (⌘K → /feedback)"
+            style={{ fontSize:11, color:T.muted, background:"transparent", border:"none", display:"inline-flex", alignItems:"center", gap:5, ...M }}>
+            <i className="ti ti-message-report" style={{ fontSize:13, color:T.cyan }} />{feedback.filter(f=>f.status==="open").length} feedback
+          </button>
           {memStats?.total > 0 && (
             <button onClick={() => profile && setShowProfile(true)} title={profile ? "View learned profile" : "Items FRIDAY has learned"}
               style={{ fontSize:11, color:T.muted, background:"transparent", border:"none", display:"inline-flex", alignItems:"center", gap:5, cursor:profile?"pointer":"default", ...M }}>
@@ -1193,6 +1222,58 @@ export default function App() {
                   </button>
                 </div>
               ))
+            }
+          </div>
+        </div>
+      )}
+
+      {/* Feedback modal — collated ideas/fixes for FRIDAY */}
+      {showFeedback && (
+        <div onClick={() => setShowFeedback(false)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.6)",
+          zIndex:400, display:"flex", alignItems:"center", justifyContent:"center", padding:24 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background:T.panel, border:`1px solid ${T.cyan}44`, borderRadius:14,
+            maxWidth:660, width:"100%", maxHeight:"82vh", overflowY:"auto", padding:"22px 24px", boxShadow:"0 24px 48px rgba(0,0,0,.7)" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+              <span style={{ fontSize:12.5, fontWeight:700, color:T.cyan, letterSpacing:".1em", ...MONO }}>
+                <i className="ti ti-message-report" style={{ marginRight:7 }} />FEEDBACK · THE BUILD LIST
+              </span>
+              <button onClick={() => setShowFeedback(false)} style={{ background:"transparent", border:"none", color:T.dim, fontSize:16 }}>
+                <i className="ti ti-x" />
+              </button>
+            </div>
+            <div style={{ fontSize:11.5, color:T.dim, marginBottom:14, lineHeight:1.6 }}>
+              Every idea or fix you log (here or via <span style={{ color:T.cyan }}>⌘K → /feedback</span>) collects here, so we can shape FRIDAY over time. Tick what's shipped.
+            </div>
+            <div style={{ display:"flex", gap:6, marginBottom:16 }}>
+              <input value={newFeedback} onChange={e => setNewFeedback(e.target.value)}
+                onKeyDown={async e => { if (e.key === "Enter" && newFeedback.trim()) { const t = newFeedback.trim(); setNewFeedback(""); try { const r = await api.addFeedback(t); setFeedback(r.feedback || []); } catch {} } }}
+                placeholder="add an idea or fix…" style={{ flex:1 }} />
+              <button onClick={async () => { const t = newFeedback.trim(); if (!t) return; setNewFeedback(""); try { const r = await api.addFeedback(t); setFeedback(r.feedback || []); } catch {} }}
+                style={{ padding:"9px 16px", background:T.cyan, border:"none", borderRadius:8, color:T.bg, fontWeight:600, fontSize:12.5, ...M }}>add</button>
+            </div>
+            {feedback.length === 0
+              ? <Note>nothing logged yet — try ⌘K then /feedback your-idea</Note>
+              : feedback.map(f => {
+                  const done = f.status === "done";
+                  return (
+                    <div key={f.id} style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"10px 0", borderBottom:`1px solid ${T.border}44`, opacity:done?0.5:1 }}>
+                      <button onClick={async () => { try { const r = await api.doneFeedback(f.id, done?"open":"done"); setFeedback(r.feedback || []); } catch {} }}
+                        title={done?"Reopen":"Mark shipped"}
+                        style={{ width:18, height:18, marginTop:1, borderRadius:5, border:`1.5px solid ${done?T.green:T.borderB}`,
+                          background:done?T.greenD:"transparent", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, color:T.green, fontSize:11 }}>
+                        {done && "✓"}
+                      </button>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontSize:13, color:done?T.dim:T.text, lineHeight:1.55, textDecoration:done?"line-through":"none" }}>{f.text}</div>
+                        <div style={{ fontSize:10, color:T.dim, marginTop:3, ...MONO }}>{new Date(f.created_at).toLocaleDateString("en-IN",{day:"2-digit",month:"short"})}</div>
+                      </div>
+                      <button onClick={async () => { try { const r = await api.deleteFeedback(f.id); setFeedback(r.feedback || []); } catch {} }} title="Delete"
+                        style={{ background:"transparent", border:"none", color:T.dim, fontSize:13, flexShrink:0 }}>
+                        <i className="ti ti-trash" />
+                      </button>
+                    </div>
+                  );
+                })
             }
           </div>
         </div>

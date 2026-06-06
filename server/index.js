@@ -577,6 +577,24 @@ app.delete("/api/loops/manual/:id", (req, res) => {
   res.json({ ok: true, manual: db.getManualLoops(false) });
 });
 
+// Feedback — product ideas / fixes for FRIDAY, captured via /feedback in chat.
+app.get("/api/feedback", (req, res) => res.json({ feedback: db.getFeedback() }));
+app.post("/api/feedback", (req, res) => {
+  const text = (req.body?.text || "").trim();
+  if (!text) return res.status(400).json({ error: "text required" });
+  const id = db.addFeedback(text);
+  logMemory("feedback", text); // also mirrored to the Google memory sheet
+  res.json({ ok: true, id, feedback: db.getFeedback() });
+});
+app.post("/api/feedback/:id/done", (req, res) => {
+  db.setFeedbackStatus(Number(req.params.id), req.body?.status === "open" ? "open" : "done");
+  res.json({ ok: true, feedback: db.getFeedback() });
+});
+app.delete("/api/feedback/:id", (req, res) => {
+  db.deleteFeedback(Number(req.params.id));
+  res.json({ ok: true, feedback: db.getFeedback() });
+});
+
 // Recent queued jobs (UI shows what's waiting / lets chat pick up its answer)
 app.get("/api/outbox", (req, res) => res.json({ jobs: db.getOutbox(30), ...queue.status() }));
 app.get("/api/outbox/:id", (req, res) => {
