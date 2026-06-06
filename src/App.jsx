@@ -1108,7 +1108,7 @@ export default function App() {
           {[["today","ti-calendar",meets,T.green],["loops","ti-target",sOpen+mOpen,T.slack],["standup","ti-presentation",0,T.blue]].map(([k,icon,badge,color]) => {
             const on = rightTab === k;
             return (
-              <button key={k} onClick={() => setRightTab(k)} title={k}
+              <button key={k} onClick={() => { setRightTab(k); setShowAll({}); }} title={k}
                 style={{ width:46, height:46, borderRadius:12, position:"relative", cursor:"pointer",
                   background:on?T.card:"transparent", border:`1px solid ${on?T.borderB:"transparent"}`,
                   color:on?color:T.muted, display:"flex", alignItems:"center", justifyContent:"center", transition:"all .14s" }}>
