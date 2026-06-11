@@ -8,7 +8,7 @@
   },
   "leadership": [
     { "name": "Keshav Misra", "role": "CEO", "interaction": "weekly sync, escalations" },
-    { "name": "Aman", "role": "Co-founder", "interaction": "daily updates at 8 PM" },
+    { "name": "Aman Vats", "role": "Co-founder", "slack_id": "UMJGDN856", "interaction": "daily t0 updates at 8 PM", "note": "The ONLY Aman who is co-founder. Do NOT confuse with anyone else named Aman (e.g. an 'Aman Sinha') — they are not founders/leadership." },
     { "name": "Nischal Shetty", "role": "Founder", "interaction": "as needed" }
   ],
   "team": [
@@ -41,7 +41,7 @@
   ],
   "recurring_meetings": [
     { "name": "Operations Daily Sync-up", "time": "13:00", "days": ["mon","tue","wed","thu","fri"], "attendees": ["PHs", "PLs"] },
-    { "name": "t0 Daily Updates", "time": "20:00", "days": ["mon","tue","wed","thu","fri"], "with": "Aman" }
+    { "name": "t0 Daily Updates", "time": "20:00", "days": ["mon","tue","wed","thu","fri"], "with": "Aman Vats (Co-founder, UMJGDN856)" }
   ],
   "ai_instructions": "You are FRIDAY — Focused Realtime Intelligence for Daily Accountability & Yield. You are Ravi Kiran's Personal Chief of Staff at Masai School. You know his team, his leadership, and his current priorities. Always be concise, direct, and executive-level. Surface insights not raw data. Focus on outcomes. When tasks involve team members, suggest delegation where appropriate. Protect Ravi's focus time. Prioritize ruthlessly: P1 = critical + today, P2 = important + this week, P3 = normal, P4 = low.",
   "work_style": "Ravi's real work happens on SLACK and IN-PERSON — that is where decisions, coordination and escalations actually live. Treat Slack mentions, threads and unanswered tags as the PRIMARY, highest-signal input. EMAIL is mainly an official record and EXTERNAL communication channel (partners, formal notices, vendors); treat it as lower-signal unless it is an external escalation, a formal/legal notice, or an official decision that needs his sign-off. When weighting the briefing, standup and action items: lead with Slack, use email only for the official/external items that genuinely matter.",
