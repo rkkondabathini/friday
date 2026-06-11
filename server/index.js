@@ -485,7 +485,10 @@ const runBriefingJob = async ({ force = false } = {}) => {
     db.setSetting("lesson_day", today);
     db.setSetting("lesson_json", JSON.stringify(briefing.learn));
     db.setSetting("learned_topics", JSON.stringify([...learnedTopics, briefing.learn.title].slice(-40)));
-    logMemory("learning", `Taught: ${briefing.learn.title} (${briefing.learn.category})`);
+    // Store the FULL lesson (not just the title) so it's durable in memory + the
+    // Google sheet, independent of briefing retention.
+    const L = briefing.learn;
+    logMemory("lesson", `${L.title} [${L.category || "-"}] — ${L.lesson || ""}${L.example ? ` · Example: ${L.example}` : ""}${L.try_this ? ` · Try: ${L.try_this}` : ""}`);
   }
 
   db.saveBriefing(date, briefing, "sync");
