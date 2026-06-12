@@ -79,6 +79,8 @@ a:hover { opacity: .82 }
 .rise   { animation: rise .22s cubic-bezier(.2,.7,.3,1) both }
 .hovcard { transition: background .14s, border-color .14s, transform .14s }
 .hovcard:hover { background: ${T.cardHi}; border-color: ${T.borderB} }
+@keyframes urgpulse { 0%,100% { box-shadow: 0 0 0 0 ${T.red}00 } 50% { box-shadow: 0 0 0 5px ${T.red}26 } }
+.urgpulse { animation: urgpulse 1.4s ease-in-out infinite }
 `;
 
 // ── Small components ───────────────────────────────────────────
@@ -270,10 +272,14 @@ export default function App() {
   const [directives, setDirectives] = useState([]);
   const [showDirectives, setShowDirectives] = useState(false);
   const [newDirective, setNewDirective] = useState("");
+  const [clock,    setClock]    = useState(Date.now());  // ticks the urgency countdown
   const chatEndRef = useRef(null);
   const inputRef   = useRef(null);
 
   useEffect(() => { init(); }, []);
+
+  // Urgency engine: re-tick every 20s so the "next hard edge" countdown stays live.
+  useEffect(() => { const id = setInterval(() => setClock(Date.now()), 20000); return () => clearInterval(id); }, []);
 
   // Handle the OAuth return (?connect=google&status=ok) and load connections
   useEffect(() => {
@@ -608,9 +614,37 @@ export default function App() {
   // or captured item lowers it, and clearing them pushes it back up. Email is excluded
   // (low-signal by design) so it never unfairly tanks the score. Meant to motivate.
   const focusScore = loops ? Math.max(8, Math.min(100, 100 - (sOpen + mOpen) * 9)) : null;
-  const now   = new Date();
+  const now   = new Date(clock);
   const timeStr = now.toLocaleTimeString("en-IN", { hour:"2-digit", minute:"2-digit", hour12:false });
   const dateStr = now.toLocaleDateString("en-IN", { weekday:"short", day:"2-digit", month:"short" });
+
+  // ── Urgency engine (aggressive, work-hours) — all client-side, zero Claude tokens ──
+  // Your wiring fires under visible scarcity, so manufacture a near deadline you can't unsee.
+  const atToday = (t) => { const [h,m] = (t||"0:0").split(":").map(Number); const d = new Date(clock); d.setHours(h, m, 0, 0); return d; };
+  const WORK_END = atToday("21:00");
+  const edges = [
+    ...(schedule || [])
+      .filter(b => b.type === "meeting" && b.time)
+      .map(b => ({ label: b.block, at: atToday(b.time), kind: "meeting" })),
+    { label: "Work day ends", at: WORK_END, kind: "end" },
+  ].filter(e => e.at > now).sort((a, b) => a.at - b.at);
+  const nextEdge = edges[0] || null;
+  const edgeMins = nextEdge ? Math.max(0, Math.round((nextEdge.at - now) / 60000)) : null;
+  const fmtLeft  = (m) => m >= 60 ? `${Math.floor(m/60)}h ${m%60}m` : `${m}m`;
+  // Heat escalates as the window closes — aggressive by design.
+  const heat = edgeMins == null ? T.dim
+    : edgeMins <= 30 ? T.red
+    : edgeMins <= 60 ? T.amber
+    : T.green;
+  const hot = edgeMins != null && edgeMins <= 15;   // pulse + "MOVE" framing
+  // The ONE next move — your brain discounts projects, so surface a single action.
+  const p1Open = rawTasks.map(t => ({ ...t, status: ov[t.id] || t.status })).filter(t => t.priority === "P1" && t.status !== "Completed");
+  const doNow  = p1Open[0]?.task
+    || briefing?.critical_updates?.[0]?.title
+    || briefing?.decisions_needed?.[0]?.title
+    || slackOpen[0]?.text
+    || null;
+  const offHours = now.getHours() >= 21 || now.getHours() < 10;  // engine live 10:00–21:00 (work edges only)
 
   // A "+ show all (N)" / "show less" toggle for a capped section.
   const Expander = ({ k, total, cap }) => total > cap ? (
@@ -1000,6 +1034,40 @@ export default function App() {
           {syncing ? "syncing…" : "Sync"}
         </button>
       </div>
+
+      {/* ── Urgency engine — the next hard edge you can't unsee ── */}
+      {!offHours && nextEdge && (
+        <div className={hot ? "urgpulse" : ""} style={{ marginBottom:16, borderRadius:14, overflow:"hidden",
+          background:T.card, border:`1.5px solid ${heat}${heat===T.green?"55":"99"}`,
+          boxShadow: hot ? "none" : `0 0 0 0 transparent` }}>
+          <div style={{ display:"flex", alignItems:"center", gap:16, padding:"14px 18px" }}>
+            <i className="ti ti-bolt" style={{ fontSize:22, color:heat, flexShrink:0 }} />
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontSize:10, fontWeight:700, color:heat, letterSpacing:".18em", ...MONO }}>
+                {hot ? "⚠ MOVE NOW" : "NEXT HARD EDGE"}
+              </div>
+              <div style={{ fontSize:16, fontWeight:600, color:T.bright, marginTop:3, lineHeight:1.25, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+                {nextEdge.label}
+                <span style={{ fontSize:12, color:T.dim, fontWeight:500, marginLeft:8, ...MONO }}>
+                  hard stop {nextEdge.at.toLocaleTimeString("en-IN", { hour:"2-digit", minute:"2-digit", hour12:false })}
+                </span>
+              </div>
+            </div>
+            <div style={{ textAlign:"right", flexShrink:0 }}>
+              <div style={{ fontSize:30, fontWeight:800, color:heat, lineHeight:1, letterSpacing:"-0.02em", ...MONO }}>{fmtLeft(edgeMins)}</div>
+              <div style={{ fontSize:9.5, color:T.dim, letterSpacing:".14em", marginTop:3, ...MONO }}>LEFT</div>
+            </div>
+          </div>
+          {doNow && (
+            <div style={{ display:"flex", alignItems:"center", gap:10, padding:"11px 18px",
+              borderTop:`1px solid ${T.border}`, background:T.bg }}>
+              <span style={{ fontSize:9.5, fontWeight:700, color:heat, letterSpacing:".14em", flexShrink:0, ...MONO }}>DO THIS NOW</span>
+              <span style={{ flex:1, minWidth:0, fontSize:13.5, fontWeight:600, color:T.bright, lineHeight:1.3,
+                whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{doNow}</span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Hero — the one thing that matters today */}
       <div style={{ marginBottom:20 }}>
