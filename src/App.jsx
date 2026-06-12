@@ -24,6 +24,10 @@ const srcStyle = {
 };
 const urgC  = { high:T.red,    medium:T.amber, low:T.green };
 const prioC = { P1:[T.red,T.redD], P2:[T.amber,T.amberD], P3:[T.blue,T.blueD], P4:[T.dim,T.panel] };
+// Priority of an important (Slack/Gmail) item — use the AI's explicit P1–P4 if present,
+// else derive it from urgency. Lets us rank the "Needs you" card and drive the urgency bar.
+const prioRank = { P1:0, P2:1, P3:2, P4:3 };
+const prioOf   = (u={}) => /^P[1-4]$/.test(u.priority||"") ? u.priority : (u.urgency==="high"?"P1":u.urgency==="low"?"P3":"P2");
 const stC   = { "Not Started":T.dim, "In Progress":T.blue, "Waiting on Others":T.amber, "Completed":T.green };
 const ttC   = { decision:T.purple, action:T.blue, delegate:T.amber, followup:T.cyan, people:T.green };
 const tyI   = { deep_work:"ti-brain", meeting:"ti-calendar-event", followup:"ti-arrow-back", comms:"ti-mail", buffer:"ti-clock", strategic:"ti-telescope" };
@@ -619,31 +623,27 @@ export default function App() {
   const dateStr = now.toLocaleDateString("en-IN", { weekday:"short", day:"2-digit", month:"short" });
 
   // ── Urgency engine (aggressive, work-hours) — all client-side, zero Claude tokens ──
-  // Your wiring fires under visible scarcity, so manufacture a near deadline you can't unsee.
+  // What needs you NOW is driven by Slack/Gmail importance (priority-ranked), not the
+  // calendar. The next meeting is kept only as a secondary time cue (a real hard stop).
   const atToday = (t) => { const [h,m] = (t||"0:0").split(":").map(Number); const d = new Date(clock); d.setHours(h, m, 0, 0); return d; };
-  const WORK_END = atToday("21:00");
-  const edges = [
-    ...(schedule || [])
-      .filter(b => b.type === "meeting" && b.time)
-      .map(b => ({ label: b.block, at: atToday(b.time), kind: "meeting" })),
-    { label: "Work day ends", at: WORK_END, kind: "end" },
-  ].filter(e => e.at > now).sort((a, b) => a.at - b.at);
+  // Priority-ranked important items (Slack/Gmail) — this is the headline of the bar + card.
+  const importantItems = (briefing?.critical_updates || [])
+    .map(u => ({ ...u, prio: prioOf(u) }))
+    .sort((a, b) => prioRank[a.prio] - prioRank[b.prio]);
+  const topItem = importantItems[0] || null;
+  // Next real calendar hard stop (secondary time cue).
+  const edges = (schedule || [])
+    .filter(b => b.type === "meeting" && b.time)
+    .map(b => ({ label: b.block, at: atToday(b.time) }))
+    .filter(e => e.at > now).sort((a, b) => a.at - b.at);
   const nextEdge = edges[0] || null;
   const edgeMins = nextEdge ? Math.max(0, Math.round((nextEdge.at - now) / 60000)) : null;
   const fmtLeft  = (m) => m >= 60 ? `${Math.floor(m/60)}h ${m%60}m` : `${m}m`;
-  // Heat escalates as the window closes — aggressive by design.
-  const heat = edgeMins == null ? T.dim
-    : edgeMins <= 30 ? T.red
-    : edgeMins <= 60 ? T.amber
-    : T.green;
-  const hot = edgeMins != null && edgeMins <= 15;   // pulse + "MOVE" framing
-  // The ONE next move — your brain discounts projects, so surface a single action.
-  const p1Open = rawTasks.map(t => ({ ...t, status: ov[t.id] || t.status })).filter(t => t.priority === "P1" && t.status !== "Completed");
-  const doNow  = p1Open[0]?.task
-    || briefing?.critical_updates?.[0]?.title
-    || briefing?.decisions_needed?.[0]?.title
-    || slackOpen[0]?.text
-    || null;
+  const edgeAt   = nextEdge ? nextEdge.at.toLocaleTimeString("en-IN", { hour:"2-digit", minute:"2-digit", hour12:false }) : null;
+  // Heat = priority of the top item (what actually needs you), escalated if a meeting is imminent.
+  const heat = topItem ? (prioC[topItem.prio]?.[0] || T.amber)
+    : edgeMins == null ? T.dim : edgeMins <= 30 ? T.red : edgeMins <= 60 ? T.amber : T.green;
+  const hot  = (topItem?.prio === "P1") || (edgeMins != null && edgeMins <= 15);  // pulse + "now" framing
   const offHours = now.getHours() >= 21 || now.getHours() < 10;  // engine live 10:00–21:00 (work edges only)
 
   // A "+ show all (N)" / "show less" toggle for a capped section.
@@ -656,22 +656,40 @@ export default function App() {
     </button>
   ) : null;
 
-  // Today's schedule as a compact vertical timeline (capped to 6 unless expanded).
+  // Today's schedule — auto-anchored to NOW: completed blocks collapse into a header,
+  // the current/next block sits at the top, and upcoming blocks are capped (expand for the rest).
   const renderSchedule = () => {
     const all = schedule || [];
     if (!all.length) return <Note>no schedule yet — hit sync</Note>;
-    const shown = showAll.today ? all : all.slice(0, 6);
+    const rows = all.map((b, i) => {
+      const [h, m]   = (b.time || "0:0").split(":").map(Number);
+      const start    = new Date(clock); start.setHours(h, m, 0, 0);
+      const next     = all[i + 1];
+      const [nh, nm] = next ? (next.time || "0:0").split(":").map(Number) : [h+1, 0];
+      const end      = new Date(clock); end.setHours(nh, nm, 0, 0);
+      return { b, isNow: now >= start && now < end, isPast: now >= end };
+    });
+    const activeIdx = rows.findIndex(r => !r.isPast);
+    const anchor    = activeIdx === -1 ? Math.max(0, rows.length - 3) : activeIdx;  // current/next, or tail if day's done
+    const past      = rows.slice(0, anchor);
+    const fromNow   = rows.slice(anchor);
+    const upShown   = showAll.today ? fromNow : fromNow.slice(0, 7);
+    const showPast  = !!showAll.todayPast;
+    const rendered  = (showPast ? past : []).concat(upShown);
     return (
       <div style={{ position:"relative" }}>
-        {shown.map((b, i) => {
-          const [h, m]   = (b.time || "0:0").split(":").map(Number);
-          const start    = new Date(); start.setHours(h, m, 0, 0);
-          const next     = schedule[i + 1];
-          const [nh, nm] = next ? (next.time || "0:0").split(":").map(Number) : [h+1, 0];
-          const end      = new Date(); end.setHours(nh, nm, 0, 0);
-          const isNow    = now >= start && now < end;
-          const isPast   = now >= end;
-          const c        = tyC[b.type] || T.muted;
+        {past.length > 0 && (
+          <button onClick={() => setShowAll(s => ({ ...s, todayPast: !s.todayPast }))}
+            style={{ fontSize:11.5, color:T.dim, background:"transparent", border:`1px solid ${T.border}`,
+              borderRadius:8, padding:"6px 11px", marginBottom:10, display:"inline-flex", alignItems:"center", gap:6, ...M }}>
+            <i className={`ti ti-chevron-${showPast?"up":"down"}`} style={{ fontSize:13 }} />
+            <i className="ti ti-circle-check" style={{ fontSize:13, color:T.green }} />
+            {showPast ? "hide earlier" : `${past.length} earlier ${past.length===1?"block":"blocks"} done`}
+          </button>
+        )}
+        {rendered.map((r, i) => {
+          const b = r.b, isNow = r.isNow, isPast = r.isPast;
+          const c = tyC[b.type] || T.muted;
           return (
             <div key={i} style={{ display:"flex", gap:11, alignItems:"stretch", opacity:isPast?0.4:1 }}>
               <div style={{ width:38, flexShrink:0, textAlign:"right", paddingTop:11 }}>
@@ -683,7 +701,7 @@ export default function App() {
                   boxShadow:isNow?`0 0 0 4px ${c}22`:"none", zIndex:1 }}>
                   <i className={`ti ${tyI[b.type]||"ti-clock"}`} style={{ fontSize:13, color:isNow?T.bg:c }} />
                 </div>
-                {i < shown.length-1 && <div style={{ width:1.5, flex:1, background:T.border, minHeight:12 }} />}
+                {i < rendered.length-1 && <div style={{ width:1.5, flex:1, background:T.border, minHeight:12 }} />}
               </div>
               <div style={{ flex:1, minWidth:0, marginBottom:7, paddingTop:9 }}>
                 <div style={{ display:"flex", alignItems:"center", gap:7 }}>
@@ -695,7 +713,8 @@ export default function App() {
             </div>
           );
         })}
-        <Expander k="today" total={all.length} cap={6} />
+        {activeIdx === -1 && <Note>day's done ✓ — set tomorrow up</Note>}
+        <Expander k="today" total={fromNow.length} cap={7} />
       </div>
     );
   };
@@ -1043,37 +1062,38 @@ export default function App() {
         </button>
       </div>
 
-      {/* ── Urgency engine — the next hard edge you can't unsee ── */}
-      {!offHours && nextEdge && (
+      {/* ── Urgency engine — what needs you now (priority-ranked), with the next meeting as a time cue ── */}
+      {!offHours && (topItem || nextEdge) && (
         <div className={hot ? "urgpulse" : ""} style={{ marginBottom:16, borderRadius:14, overflow:"hidden",
-          background:T.card, border:`1.5px solid ${heat}${heat===T.green?"55":"99"}`,
-          boxShadow: hot ? "none" : `0 0 0 0 transparent` }}>
-          <div style={{ display:"flex", alignItems:"center", gap:16, padding:"14px 18px" }}>
-            <i className="ti ti-bolt" style={{ fontSize:22, color:heat, flexShrink:0 }} />
+          background:T.card, border:`1.5px solid ${heat}${heat===T.green?"55":"99"}` }}>
+          <div style={{ display:"flex", alignItems:"center", gap:14, padding:"14px 18px" }}>
+            {topItem ? (
+              <span style={{ fontSize:13, fontWeight:800, color:prioC[topItem.prio]?.[0], background:prioC[topItem.prio]?.[1],
+                border:`1px solid ${prioC[topItem.prio]?.[0]}55`, borderRadius:8, padding:"5px 9px", flexShrink:0, ...MONO }}>{topItem.prio}</span>
+            ) : (
+              <i className="ti ti-bolt" style={{ fontSize:22, color:heat, flexShrink:0 }} />
+            )}
             <div style={{ flex:1, minWidth:0 }}>
-              <div style={{ fontSize:10, fontWeight:700, color:heat, letterSpacing:".18em", ...MONO }}>
-                {hot ? "⚠ MOVE NOW" : "NEXT HARD EDGE"}
+              <div style={{ fontSize:10, fontWeight:700, color:heat, letterSpacing:".18em", display:"flex", alignItems:"center", gap:7, ...MONO }}>
+                {topItem ? (hot ? "⚠ DO THIS NOW" : "DO THIS NOW") : "NEXT HARD EDGE"}
+                {topItem?.source && <i className={`ti ${srcStyle[topItem.source]?.icon || "ti-pencil"}`} style={{ fontSize:12, color:(srcStyle[topItem.source]||srcStyle.manual).color }} />}
               </div>
               <div style={{ fontSize:16, fontWeight:600, color:T.bright, marginTop:3, lineHeight:1.25, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
-                {nextEdge.label}
-                <span style={{ fontSize:12, color:T.dim, fontWeight:500, marginLeft:8, ...MONO }}>
-                  hard stop {nextEdge.at.toLocaleTimeString("en-IN", { hour:"2-digit", minute:"2-digit", hour12:false })}
-                </span>
+                {topItem ? topItem.title : nextEdge.label}
               </div>
+              {topItem && nextEdge && (
+                <div style={{ fontSize:11.5, color:T.dim, marginTop:4, ...MONO }}>
+                  next: {nextEdge.label} · {edgeAt}
+                </div>
+              )}
             </div>
-            <div style={{ textAlign:"right", flexShrink:0 }}>
-              <div style={{ fontSize:30, fontWeight:800, color:heat, lineHeight:1, letterSpacing:"-0.02em", ...MONO }}>{fmtLeft(edgeMins)}</div>
-              <div style={{ fontSize:9.5, color:T.dim, letterSpacing:".14em", marginTop:3, ...MONO }}>LEFT</div>
-            </div>
+            {nextEdge && (
+              <div style={{ textAlign:"right", flexShrink:0 }}>
+                <div style={{ fontSize:28, fontWeight:800, color: edgeMins<=15?T.red:edgeMins<=60?T.amber:T.muted, lineHeight:1, letterSpacing:"-0.02em", ...MONO }}>{fmtLeft(edgeMins)}</div>
+                <div style={{ fontSize:9, color:T.dim, letterSpacing:".12em", marginTop:3, ...MONO }}>TO NEXT MEET</div>
+              </div>
+            )}
           </div>
-          {doNow && (
-            <div style={{ display:"flex", alignItems:"center", gap:10, padding:"11px 18px",
-              borderTop:`1px solid ${T.border}`, background:T.bg }}>
-              <span style={{ fontSize:9.5, fontWeight:700, color:heat, letterSpacing:".14em", flexShrink:0, ...MONO }}>DO THIS NOW</span>
-              <span style={{ flex:1, minWidth:0, fontSize:13.5, fontWeight:600, color:T.bright, lineHeight:1.3,
-                whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{doNow}</span>
-            </div>
-          )}
         </div>
       )}
 
@@ -1120,16 +1140,17 @@ export default function App() {
       {/* LEFT — what needs you */}
       <div style={{ display:"flex", flexDirection:"column", gap:16, minWidth:0 }}>
         <Panel title="Needs you" icon="ti-flame" accent={T.red} count={(briefing?.critical_updates||[]).length}>
-          {(briefing?.critical_updates || []).map((u, i) => {
-            const c = urgC[u.urgency || "medium"];
-            const key = `cu-${i}`;
+          {importantItems.map((u, i) => {
+            const pc = prioC[u.prio] || prioC.P3;
+            const key = `cu-${u.id ?? i}`;
             const open = expanded[key] ?? (i === 0); // first one open, rest collapsed
             return (
-              <div key={i} style={{ background:T.card, border:`1px solid ${T.border}`, borderLeft:`2px solid ${c}`,
+              <div key={key} style={{ background:T.card, border:`1px solid ${T.border}`, borderLeft:`2px solid ${pc[0]}`,
                 borderRadius:6, marginBottom:6, overflow:"hidden" }}>
                 <div onClick={() => setExpanded(e => ({ ...e, [key]: !open }))}
                   style={{ display:"flex", alignItems:"center", gap:10, padding:"11px 14px", cursor:"pointer" }}>
-                  <span style={{ width:7, height:7, borderRadius:"50%", background:c, flexShrink:0 }} />
+                  <span title={`priority ${u.prio}`} style={{ fontSize:10.5, fontWeight:800, color:pc[0], background:pc[1],
+                    border:`1px solid ${pc[0]}44`, borderRadius:6, padding:"2px 6px", flexShrink:0, ...MONO }}>{u.prio}</span>
                   <span style={{ flex:1, fontSize:14, fontWeight:600, color:T.bright, lineHeight:1.35 }}>{u.title}</span>
                   <i className={`ti ${srcStyle[u.source]?.icon || "ti-pencil"}`} style={{ fontSize:13, color:(srcStyle[u.source]||srcStyle.manual).color, flexShrink:0 }} />
                   <i className={`ti ti-chevron-${open?"up":"down"}`} style={{ fontSize:14, color:T.dim, flexShrink:0 }} />

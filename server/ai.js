@@ -251,7 +251,7 @@ CARRY-FORWARD (incomplete tasks from yesterday):
 ${compactTasks(carryForwardTasks)}
 
 == HOW TO BUILD EACH SECTION (follow precisely) ==
-1. briefing.critical_updates — 3 to 5 items that genuinely need his attention today. Each: a specific title and a detail of 1-2 full sentences with the real context (who, which program/batch, why it matters, what's at stake). urgency = "high" | "medium" | "low". Draw from email/slack signals AND the standing priorities.
+1. briefing.critical_updates — 3 to 5 items that genuinely need his attention today, drawn PRIMARILY from Slack and Gmail signals (his real channels) plus the standing priorities. Each: a specific title and a detail of 1-2 full sentences with the real context (who, which program/batch, why it matters, what's at stake). source = "slack" | "gmail" | "calendar" | "manual" (where it came from). priority = "P1" (must act today — blocking someone, a deadline, a leadership/founder ask, money or a student at risk) | "P2" (important, act soon) | "P3" (worth knowing, not urgent). urgency = "high" | "medium" | "low" (mirror the priority). RANK these so the most important is first.
 2. briefing.decisions_needed — decisions only HE can make. Give title, context (the tradeoff / why it's stuck), and "from" (who's asking).
 3. briefing.stakeholder_followups — people waiting on him: person, channel, waiting_since, topic. Build this PRIMARILY from the OPEN LOOPS list (those are confirmed unanswered). Lead with the Slack open loops; include only the emails that genuinely need a personal reply. Drop anything that's just an FYI/notification.
 4. standup.leadership — what he reports UP to Keshav/Aman. yesterday = concrete things shipped; today = what he is personally driving; blockers = what's stuck + who he needs. 3 specific bullets each (not one-liners).
@@ -268,7 +268,7 @@ ${compactTasks(carryForwardTasks)}
 
 Return ONLY valid JSON, no markdown fences, exactly this shape:
 {
-  "briefing": { "critical_updates": [{"id","title","detail","source","urgency","slack_url"}], "decisions_needed": [{"title","context","from"}], "stakeholder_followups": [{"person","channel","waiting_since","topic","slack_url"}] },
+  "briefing": { "critical_updates": [{"id","title","detail","source","priority","urgency","slack_url"}], "decisions_needed": [{"title","context","from"}], "stakeholder_followups": [{"person","channel","waiting_since","topic","slack_url"}] },
   "standup": { "leadership": {"yesterday":[],"today":[],"blockers":[]}, "team": {"yesterday":[],"today":[],"delegate":[]} },
   "action_items": [{"id","task","owner","due","status","priority","priority_reason","source","type"}],
   "schedule": [{"time","block","type","notes"}],
