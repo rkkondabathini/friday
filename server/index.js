@@ -423,9 +423,12 @@ const OPEN_LOOPS_TTL_MS = 3 * 60 * 1000;
 const gatherOpenLoops = async (force = false) => {
   if (!force && _openLoopsCache.data && Date.now() - _openLoopsCache.at < OPEN_LOOPS_TTL_MS) return _openLoopsCache.data;
   const conns = Object.fromEntries(db.getConnections().map(c => [c.provider, true]));
+  // Each source degrades independently — a dead Google token must NOT blank out
+  // Slack loops or local captured items. Track failures so the UI can flag a reconnect.
+  const srcErrors = {};
   const [email, slackTags] = await Promise.all([
-    conns.google ? google.fetchGmailOpenLoops() : Promise.resolve([]),
-    conns.slack ? slack.fetchSlackOpenLoops() : Promise.resolve([]),
+    conns.google ? google.fetchGmailOpenLoops().catch(e => { srcErrors.google = e.message || "failed"; return []; }) : Promise.resolve([]),
+    conns.slack  ? slack.fetchSlackOpenLoops().catch(e => { srcErrors.slack = e.message || "failed"; return []; })  : Promise.resolve([]),
   ]);
   // Email is the low-signal channel — surface unread first, then most recent, and
   // cap it so the UI doesn't drown. Slack (his real channel) is kept in full.
@@ -446,6 +449,7 @@ const gatherOpenLoops = async (force = false) => {
       emailShown: emailOpen.length,
       manual: manual.length,
     },
+    errors: srcErrors,
     at: new Date().toISOString(),
   };
   _openLoopsCache = { at: Date.now(), data };

@@ -714,7 +714,15 @@ export default function App() {
             placeholder="jot something on you — Program Master update, call vendor…" style={{ flex:1 }} />
           <button onClick={addLoop} style={{ padding:"9px 15px", background:T.green, border:"none", borderRadius:8, color:T.bg, fontWeight:600, fontSize:12.5, ...M }}>add</button>
         </div>
-        {!loops ? <Note>detecting open loops…</Note> : (sOpen + eOpen + mOpen === 0) ? (
+        {loops?.errors?.google && (
+          <div onClick={() => doConnect("google")} title="Reconnect Google"
+            style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer", fontSize:12,
+              color:T.amber, background:T.amberD, border:`1px solid ${T.amber}44`, borderRadius:8, padding:"8px 11px", marginBottom:12, ...M }}>
+            <i className="ti ti-mail-off" style={{ fontSize:14, flexShrink:0 }} />
+            <span style={{ flex:1 }}>Google sign-in expired — email loops paused. <b style={{ fontWeight:600, textDecoration:"underline" }}>Reconnect</b></span>
+          </div>
+        )}
+        {!loops ? <Note>detecting open loops…</Note> : (sOpen + eOpen + mOpen === 0 && !loops?.errors?.google) ? (
           <div style={{ textAlign:"center", padding:"30px 0", color:T.dim }}>
             <i className="ti ti-circle-check" style={{ fontSize:28, color:T.green, marginBottom:8, display:"block" }} />
             <div style={{ fontSize:13.5, color:T.green }}>All caught up</div>
