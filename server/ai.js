@@ -194,10 +194,15 @@ RESPONSE RULES:
 // length cuts the input tokens roughly in half with no loss of useful signal.
 const clip = (s, n) => { s = String(s || "").replace(/\s+/g, " ").trim(); return s.length > n ? s.slice(0, n) + "…" : s; };
 
-const compactGmail = (mail = [], max = 30) =>
-  (mail.slice(0, max).map(m =>
-    `- ${clip(m.from, 50)} | ${clip(m.subject, 90)} | ${clip(m.snippet, 140)}`
-  ).join("\n")) + (mail.length > max ? `\n  (+${mail.length - max} more)` : "") || "  (none)";
+const compactGmail = (mail = [], max = 30) => {
+  // Addressed-to-me first (those can need a reply); tag each so the model can tell
+  // a real ask from FYI. Cc-only is low-signal noise unless it's a clear escalation.
+  const ranked = [...mail].sort((a, b) => (b.addressedToMe ? 1 : 0) - (a.addressedToMe ? 1 : 0));
+  return (ranked.slice(0, max).map(m => {
+    const tag = m.addressedToMe ? "[TO-ME]" : m.ccOnly ? "[cc/fyi]" : "";
+    return `- ${tag} ${clip(m.from, 50)} | ${clip(m.subject, 90)} | ${clip(m.snippet, 140)}`;
+  }).join("\n")) + (mail.length > max ? `\n  (+${mail.length - max} more)` : "") || "  (none)";
+};
 
 const compactCalendar = (cal = []) =>
   (cal.map(e =>
@@ -239,7 +244,7 @@ CHANNEL WEIGHTING (important): His real work happens on SLACK and IN-PERSON. Tre
 
 ${directives.length ? `== STANDING PRIORITIES (weight heavily across the whole briefing) ==\n${directives.map((d, i) => `${i + 1}. ${d}`).join("\n")}\n` : ""}
 == INPUT DATA ==
-GMAIL (received + sent):
+GMAIL (received + sent). [TO-ME] = he is in the To line (a real ask — may need his reply); [cc/fyi] = he is only Cc'd (FYI/awareness, NOT a reply obligation — IGNORE unless it is a clear escalation, a leadership/founder ask, or money/student at risk):
 ${compactGmail(gmailData)}
 CALENDAR (today's events):
 ${compactCalendar(calendarData)}

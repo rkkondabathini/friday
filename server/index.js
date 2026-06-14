@@ -430,14 +430,16 @@ const gatherOpenLoops = async (force = false) => {
     conns.google ? google.fetchGmailOpenLoops().catch(e => { srcErrors.google = e.message || "failed"; return []; }) : Promise.resolve([]),
     conns.slack  ? slack.fetchSlackOpenLoops().catch(e => { srcErrors.slack = e.message || "failed"; return []; })  : Promise.resolve([]),
   ]);
-  // Email is the low-signal channel — surface unread first, then most recent, and
-  // cap it so the UI doesn't drown. Slack (his real channel) is kept in full.
-  const emailOpen = email
-    .filter(t => !t.lastFromMe)
+  // Email is the low-signal channel. An open loop only counts if I'm DIRECTLY
+  // addressed (in To) and haven't replied — being Cc'd is FYI, not a reply
+  // obligation, so it's split out and kept off the "needs reply" count.
+  const awaitingMe = email.filter(t => !t.lastFromMe && t.addressedToMe);
+  const ccFyi      = email.filter(t => !t.lastFromMe && t.ccOnly);
+  const emailOpen = awaitingMe
     .sort((a, b) => (b.unread - a.unread) || (new Date(b.date) - new Date(a.date)))
     .slice(0, 12);
   const slackOpen = slackTags.filter(m => !m.replied);
-  const emailOpenTotal = email.filter(t => !t.lastFromMe).length;
+  const emailOpenTotal = awaitingMe.length;
   const manual = db.getManualLoops(false); // open in-person/ad-hoc items
   const data = {
     slack: slackTags, email,
@@ -445,8 +447,9 @@ const gatherOpenLoops = async (force = false) => {
     summary: {
       slackOpen: slackOpen.length, slackClosed: slackTags.length - slackOpen.length,
       emailOpen: emailOpenTotal, emailClosed: email.length - emailOpenTotal,
-      emailUnread: email.filter(t => !t.lastFromMe && t.unread).length,
+      emailUnread: awaitingMe.filter(t => t.unread).length,
       emailShown: emailOpen.length,
+      emailCcFyi: ccFyi.length,   // only Cc'd — surfaced as a count, not as action
       manual: manual.length,
     },
     errors: srcErrors,

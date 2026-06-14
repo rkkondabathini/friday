@@ -794,8 +794,13 @@ export default function App() {
               <div>
                 <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:8 }}>
                   <i className="ti ti-mail" style={{ fontSize:13, color:T.cal }} />
-                  <span style={{ fontSize:11, fontWeight:700, color:T.cal, letterSpacing:".07em", ...MONO }}>EMAIL</span>
+                  <span style={{ fontSize:11, fontWeight:700, color:T.cal, letterSpacing:".07em", ...MONO }}>EMAIL · TO YOU</span>
                   <span style={{ fontSize:10.5, color:T.dim, ...MONO }}>{eOpen}{loops?.summary?.emailUnread ? ` · ${loops.summary.emailUnread} unread` : ""}</span>
+                  {loops?.summary?.emailCcFyi > 0 && (
+                    <span title="You're only Cc'd on these — FYI, not on you to reply" style={{ marginLeft:"auto", fontSize:10, color:T.dim, ...MONO }}>
+                      {loops.summary.emailCcFyi} cc'd · FYI, set aside
+                    </span>
+                  )}
                 </div>
                 {em.map((t, i) => (
                   <div key={t.id || i} style={{ background:T.bg, border:`1px solid ${T.border}`, borderLeft:`2px solid ${T.cal}`, borderRadius:8, padding:"9px 12px", marginBottom:5, opacity:t.unread?1:0.65 }}>

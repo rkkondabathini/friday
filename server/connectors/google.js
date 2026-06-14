@@ -81,6 +81,7 @@ const fetchGmail = async (max = 15) => {
   const auth = authedClient();
   if (!auth) return [];
   const gmail = google.gmail({ version: "v1", auth });
+  const myEmail = (db.getConnection("google")?.account || "").toLowerCase();
 
   const list = await gmail.users.messages.list({
     userId: "me",
@@ -92,9 +93,11 @@ const fetchGmail = async (max = 15) => {
   const msgs = await Promise.all(
     ids.map((id) =>
       gmail.users.messages
-        .get({ userId: "me", id, format: "metadata", metadataHeaders: ["From", "Subject", "Date"] })
+        .get({ userId: "me", id, format: "metadata", metadataHeaders: ["From", "To", "Cc", "Subject", "Date"] })
         .then((r) => {
           const h = r.data.payload.headers || [];
+          const inTo = !!myEmail && decodeHeader(h, "To").toLowerCase().includes(myEmail);
+          const inCc = !!myEmail && decodeHeader(h, "Cc").toLowerCase().includes(myEmail);
           return {
             id,
             from: decodeHeader(h, "From"),
@@ -103,6 +106,8 @@ const fetchGmail = async (max = 15) => {
             snippet: r.data.snippet,
             unread: (r.data.labelIds || []).includes("UNREAD"),
             important: (r.data.labelIds || []).includes("IMPORTANT"),
+            addressedToMe: inTo,        // I'm in the To line — someone wants something from me
+            ccOnly: inCc && !inTo,      // I'm only Cc'd — FYI, low signal
           };
         })
         .catch(() => null)
@@ -160,7 +165,7 @@ const fetchGmailOpenLoops = async (days = 4, max = 25) => {
   const loops = await Promise.all(
     ids.map((id) =>
       gmail.users.threads
-        .get({ userId: "me", id, format: "metadata", metadataHeaders: ["From", "Subject", "Date"] })
+        .get({ userId: "me", id, format: "metadata", metadataHeaders: ["From", "To", "Cc", "Subject", "Date"] })
         .then((r) => {
           const msgs = r.data.messages || [];
           if (!msgs.length) return null;
@@ -170,6 +175,10 @@ const fetchGmailOpenLoops = async (days = 4, max = 25) => {
           const lastFromMe = !!myEmail && lastFrom.includes(myEmail);
           const repliedByMe = msgs.some((m) =>
             decodeHeader(m.payload.headers || [], "From").toLowerCase().includes(myEmail));
+          // Am I actually addressed, or just Cc'd (FYI)? Check across the thread:
+          // in To on any message = it's on me; only ever in Cc = low-signal FYI.
+          const inToAny = !!myEmail && msgs.some((m) => decodeHeader(m.payload.headers || [], "To").toLowerCase().includes(myEmail));
+          const inCcAny = !!myEmail && msgs.some((m) => decodeHeader(m.payload.headers || [], "Cc").toLowerCase().includes(myEmail));
           return {
             id,
             from: decodeHeader(first.payload.headers || [], "From"),
@@ -180,6 +189,8 @@ const fetchGmailOpenLoops = async (days = 4, max = 25) => {
             messages: msgs.length,
             lastFromMe,
             repliedByMe,
+            addressedToMe: inToAny,        // directly in To — likely needs my reply
+            ccOnly: inCcAny && !inToAny,   // only Cc'd — FYI, not a reply obligation
           };
         })
         .catch(() => null)
