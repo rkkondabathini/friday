@@ -200,7 +200,8 @@ const compactGmail = (mail = [], max = 30) => {
   const ranked = [...mail].sort((a, b) => (b.addressedToMe ? 1 : 0) - (a.addressedToMe ? 1 : 0));
   return (ranked.slice(0, max).map(m => {
     const tag = m.addressedToMe ? "[TO-ME]" : m.ccOnly ? "[cc/fyi]" : "";
-    return `- ${tag} ${clip(m.from, 50)} | ${clip(m.subject, 90)} | ${clip(m.snippet, 140)}`;
+    const lbl = m.labels?.length ? ` {${m.labels.join(", ")}}` : "";
+    return `- ${tag} ${clip(m.from, 50)} | ${clip(m.subject, 90)} | ${clip(m.snippet, 140)}${lbl}`;
   }).join("\n")) + (mail.length > max ? `\n  (+${mail.length - max} more)` : "") || "  (none)";
 };
 
@@ -244,7 +245,7 @@ CHANNEL WEIGHTING (important): His real work happens on SLACK and IN-PERSON. Tre
 
 ${directives.length ? `== STANDING PRIORITIES (weight heavily across the whole briefing) ==\n${directives.map((d, i) => `${i + 1}. ${d}`).join("\n")}\n` : ""}
 == INPUT DATA ==
-GMAIL (received + sent). [TO-ME] = he is in the To line (a real ask — may need his reply); [cc/fyi] = he is only Cc'd (FYI/awareness, NOT a reply obligation — IGNORE unless it is a clear escalation, a leadership/founder ask, or money/student at risk):
+GMAIL (received + sent). [TO-ME] = he is in the To line (a real ask — may need his reply); [cc/fyi] = he is only Cc'd (FYI/awareness, NOT a reply obligation — IGNORE unless it is a clear escalation, a leadership/founder ask, or money/student at risk). {curly braces} = his OWN Gmail triage labels — trust them: a "Base Secured" (done) label means resolved (do NOT surface it), an action label (e.g. Rapid Response, Action Pending, Revert Pending, followup, Closure Pending, Tactical Check) means HE flagged it to act on (treat as a real action), "Command Await" = waiting on someone else, "Spectate" = FYI only:
 ${compactGmail(gmailData)}
 CALENDAR (today's events):
 ${compactCalendar(calendarData)}

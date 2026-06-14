@@ -75,6 +75,23 @@ const authedClient = () => {
 const decodeHeader = (headers, name) =>
   (headers.find((h) => h.name.toLowerCase() === name.toLowerCase()) || {}).value || "";
 
+// id → name map for Ravi's OWN Gmail labels (the "Label_*" ones, not system labels
+// like INBOX/UNREAD). Cached ~10 min so we don't re-list on every message fetch.
+let _labelMap = { at: 0, map: null };
+const getLabelMap = async (gmail) => {
+  if (_labelMap.map && Date.now() - _labelMap.at < 10 * 60 * 1000) return _labelMap.map;
+  try {
+    const r = await gmail.users.labels.list({ userId: "me" });
+    const map = {};
+    (r.data.labels || []).forEach((l) => { if ((l.id || "").startsWith("Label_")) map[l.id] = l.name; });
+    _labelMap = { at: Date.now(), map };
+  } catch { _labelMap = { at: Date.now(), map: {} }; }
+  return _labelMap.map;
+};
+// Resolve a message/thread's labelIds to Ravi's user-label NAMES (drops system labels).
+const userLabelNames = (labelIds = [], map = {}) =>
+  [...new Set(labelIds.filter((id) => map[id]).map((id) => map[id]))];
+
 // Recent, high-signal inbox messages (last 2 days, primary/important)
 const fetchGmail = async (max = 15) => {
   const { google } = require("googleapis");
@@ -82,6 +99,7 @@ const fetchGmail = async (max = 15) => {
   if (!auth) return [];
   const gmail = google.gmail({ version: "v1", auth });
   const myEmail = (db.getConnection("google")?.account || "").toLowerCase();
+  const labelMap = await getLabelMap(gmail);
 
   const list = await gmail.users.messages.list({
     userId: "me",
@@ -108,6 +126,7 @@ const fetchGmail = async (max = 15) => {
             important: (r.data.labelIds || []).includes("IMPORTANT"),
             addressedToMe: inTo,        // I'm in the To line — someone wants something from me
             ccOnly: inCc && !inTo,      // I'm only Cc'd — FYI, low signal
+            labels: userLabelNames(r.data.labelIds, labelMap),  // Ravi's own triage labels
           };
         })
         .catch(() => null)
@@ -154,6 +173,7 @@ const fetchGmailOpenLoops = async (days = 4, max = 25) => {
   if (!auth) return [];
   const gmail = google.gmail({ version: "v1", auth });
   const myEmail = (db.getConnection("google")?.account || "").toLowerCase();
+  const labelMap = await getLabelMap(gmail);
 
   const list = await gmail.users.threads.list({
     userId: "me",
@@ -179,6 +199,7 @@ const fetchGmailOpenLoops = async (days = 4, max = 25) => {
           // in To on any message = it's on me; only ever in Cc = low-signal FYI.
           const inToAny = !!myEmail && msgs.some((m) => decodeHeader(m.payload.headers || [], "To").toLowerCase().includes(myEmail));
           const inCcAny = !!myEmail && msgs.some((m) => decodeHeader(m.payload.headers || [], "Cc").toLowerCase().includes(myEmail));
+          const labels  = userLabelNames(msgs.flatMap((m) => m.labelIds || []), labelMap);  // his triage labels on the thread
           return {
             id,
             from: decodeHeader(first.payload.headers || [], "From"),
@@ -191,6 +212,7 @@ const fetchGmailOpenLoops = async (days = 4, max = 25) => {
             repliedByMe,
             addressedToMe: inToAny,        // directly in To — likely needs my reply
             ccOnly: inCcAny && !inToAny,   // only Cc'd — FYI, not a reply obligation
+            labels,
           };
         })
         .catch(() => null)

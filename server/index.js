@@ -25,6 +25,18 @@ const connectors = { google, slack };
 const USER_TZ = (require("../src/context.json").user || {}).timezone || "Asia/Kolkata";
 const todayInTz = () => new Date().toLocaleDateString("en-CA", { timeZone: USER_TZ });
 
+// Ravi triages email with his OWN Gmail labels — they're the source of truth.
+// Map a thread's label names → state: done | action | waiting | fyi | null.
+const EMAIL_LABELS = (require("../src/context.json").email_labels) || {};
+const emailLabelState = (labels = []) => {
+  const has = (set) => (set || []).some((n) => labels.includes(n));
+  if (has(EMAIL_LABELS.done))    return "done";
+  if (has(EMAIL_LABELS.action))  return "action";
+  if (has(EMAIL_LABELS.waiting)) return "waiting";
+  if (has(EMAIL_LABELS.fyi))     return "fyi";
+  return null;
+};
+
 // Record every real Claude call's tokens + cost (reported by the CLI's JSON output).
 ai.setUsageSink((u) => { try { db.addUsage(u, todayInTz()); } catch (e) { console.warn("usage track failed:", e.message); } });
 
@@ -430,11 +442,14 @@ const gatherOpenLoops = async (force = false) => {
     conns.google ? google.fetchGmailOpenLoops().catch(e => { srcErrors.google = e.message || "failed"; return []; }) : Promise.resolve([]),
     conns.slack  ? slack.fetchSlackOpenLoops().catch(e => { srcErrors.slack = e.message || "failed"; return []; })  : Promise.resolve([]),
   ]);
-  // Email is the low-signal channel. An open loop only counts if I'm DIRECTLY
-  // addressed (in To) and haven't replied — being Cc'd is FYI, not a reply
-  // obligation, so it's split out and kept off the "needs reply" count.
-  const awaitingMe = email.filter(t => !t.lastFromMe && t.addressedToMe);
-  const ccFyi      = email.filter(t => !t.lastFromMe && t.ccOnly);
+  // Email triage respects Ravi's OWN labels first, then To-vs-Cc. A thread he has
+  // labelled "done" (Base Secured) is resolved → never an open loop. It needs his
+  // reply if he tagged it an action label, OR he's directly addressed (To) and it
+  // isn't tagged waiting/FYI. Cc-only / waiting / FYI stay off the "needs reply" count.
+  const st = (t) => emailLabelState(t.labels);
+  const live = email.filter(t => !t.lastFromMe && st(t) !== "done");
+  const awaitingMe = live.filter(t => st(t) === "action" || (t.addressedToMe && st(t) !== "waiting" && st(t) !== "fyi"));
+  const ccFyi      = live.filter(t => !awaitingMe.includes(t));   // open but FYI / waiting / just Cc'd
   const emailOpen = awaitingMe
     .sort((a, b) => (b.unread - a.unread) || (new Date(b.date) - new Date(a.date)))
     .slice(0, 12);
