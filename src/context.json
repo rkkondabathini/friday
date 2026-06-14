@@ -50,7 +50,7 @@
     "action": ["Status/Suit Up", "Status/Scan"],
     "waiting": ["Status/Standby"],
     "done": ["Status/Secured"],
-    "fyi": []
+    "fyi": ["FYI"]
   },
   "daily_learning": "Each day teach Ravi ONE genuinely useful, NEW, often-under-the-radar thing that helps a senior operations leader with ~10 years of experience grow — professionally AND personally. ROTATE widely across domains, don't stay on spreadsheets: Google Sheets/Excel & data tricks, product management (frameworks, prioritisation, metrics, discovery), management & leadership (delegation, feedback, 1:1s, hiring, influence), finance & business acumen (unit economics, P&L, budgeting, ROI, fundraising basics), strategy & decision-making (mental models, frameworks), negotiation & communication, systems/process design & automation, and occasionally personal effectiveness (focus, energy, career growth). Prefer things that are rare-but-high-leverage over basics he likely knows. Never repeat a past topic. Keep it practical and grounded in his world: what it is, a tiny concrete example tied to his ops/leadership work, and one specific thing to try today."
 }
