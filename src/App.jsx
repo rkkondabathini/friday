@@ -2,36 +2,63 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import * as api from "./api";
 
 // ── Theme ──────────────────────────────────────────────────────
-const T = {
-  bg:"#0a0c10", panel:"#12151b", card:"#161a22", cardHi:"#1b212b", border:"#232b36", borderB:"#333d4c",
-  text:"#cdd4df", dim:"#5a6373", muted:"#828d9c", bright:"#f4f7fb",
-  green:"#37d399", greenD:"#37d39914",
-  blue:"#5f9bf5", blueD:"#5f9bf514",
-  amber:"#f2b34d", amberD:"#f2b34d14",
-  red:"#fb6a6a", redD:"#fb6a6a14",
-  purple:"#a98bf0", purpleD:"#a98bf014",
-  cyan:"#48c9e0", cyanD:"#48c9e014",
-  slack:"#d9a23f", slackD:"#d9a23f14",
-  gmail:"#e0683f", gmailD:"#e0683f14",
-  cal:"#5f9bf5", calD:"#5f9bf514",
+// Monochrome + red. Two hex palettes (light/dark) swapped at runtime — kept as real
+// hex (not CSS vars) so the pervasive `color + "alpha"` pattern still works.
+// In monochrome every former hue collapses to a neutral ink tone; red is the ONLY
+// color, reserved for genuine urgency. "green" now plays the role of the ink accent.
+const palettes = {
+  dark: {
+    bg:"#0c0d10", panel:"#131519", card:"#15171b", cardHi:"#1c1f25", border:"#23262c", borderB:"#31353d",
+    text:"#9aa0a8", dim:"#666b73", muted:"#9aa0a8", bright:"#e9ebee",
+    green:"#e9ebee", greenD:"#e9ebee12",
+    blue:"#9aa0a8",  blueD:"#9aa0a812",
+    amber:"#c4c9cf", amberD:"#c4c9cf12",
+    red:"#f0616d",   redD:"#f0616d20",
+    purple:"#9aa0a8",purpleD:"#9aa0a812",
+    cyan:"#9aa0a8",  cyanD:"#9aa0a812",
+    slack:"#a594c9", slackD:"#a594c918",
+    gmail:"#d08a6f", gmailD:"#d08a6f18",
+    cal:"#7fa3c4",   calD:"#7fa3c418",
+  },
+  light: {
+    bg:"#fcfcfb", panel:"#ffffff", card:"#ffffff", cardHi:"#f4f4f2", border:"#eae9e4", borderB:"#dad8d2",
+    text:"#585d64", dim:"#9499a0", muted:"#585d64", bright:"#18181b",
+    green:"#18181b", greenD:"#18181b0a",
+    blue:"#585d64",  blueD:"#585d640a",
+    amber:"#3a3d42", amberD:"#3a3d420a",
+    red:"#d63a4a",   redD:"#d63a4a14",
+    purple:"#585d64",purpleD:"#585d640a",
+    cyan:"#585d64",  cyanD:"#585d640a",
+    slack:"#8338b8", slackD:"#8338b814",
+    gmail:"#c2410c", gmailD:"#c2410c14",
+    cal:"#2b6cb0",   calD:"#2b6cb014",
+  },
 };
+let T = palettes.dark;
 
-const srcStyle = {
-  gmail:    { color:T.gmail,  bg:T.gmailD,  icon:"ti-mail",         label:"gmail"    },
-  slack:    { color:T.slack,  bg:T.slackD,  icon:"ti-brand-slack",  label:"slack"    },
-  calendar: { color:T.cal,    bg:T.calD,    icon:"ti-calendar",     label:"cal"      },
-  manual:   { color:"#c8c8c8",bg:"#c8c8c815",icon:"ti-pencil",      label:"manual"   },
+// Maps that derive from the palette — rebuilt whenever the theme flips.
+let srcStyle, urgC, prioC, stC, ttC, tyC;
+const buildMaps = () => {
+  srcStyle = {
+    gmail:    { color:T.gmail, bg:T.gmailD, icon:"ti-mail",         label:"gmail"  },
+    slack:    { color:T.slack, bg:T.slackD, icon:"ti-brand-slack",  label:"slack"  },
+    calendar: { color:T.cal,   bg:T.calD,   icon:"ti-calendar",     label:"cal"    },
+    manual:   { color:T.muted, bg:T.cardHi, icon:"ti-pencil",       label:"manual" },
+  };
+  urgC  = { high:T.red, medium:T.muted, low:T.dim };
+  prioC = { P1:[T.red,T.redD], P2:[T.bright,T.cardHi], P3:[T.muted,T.cardHi], P4:[T.dim,T.cardHi] };
+  stC   = { "Not Started":T.dim, "In Progress":T.muted, "Waiting on Others":T.muted, "Completed":T.bright };
+  ttC   = { decision:T.muted, action:T.muted, delegate:T.muted, followup:T.muted, people:T.muted };
+  tyC   = { deep_work:T.muted, meeting:T.cal, followup:T.muted, comms:T.gmail, buffer:T.dim, strategic:T.muted };
 };
-const urgC  = { high:T.red,    medium:T.amber, low:T.green };
-const prioC = { P1:[T.red,T.redD], P2:[T.amber,T.amberD], P3:[T.blue,T.blueD], P4:[T.dim,T.panel] };
+buildMaps();
+const setPalette = (mode) => { T = palettes[mode] || palettes.dark; buildMaps(); };
+
 // Priority of an important (Slack/Gmail) item — use the AI's explicit P1–P4 if present,
-// else derive it from urgency. Lets us rank the "Needs you" card and drive the urgency bar.
+// else derive it from urgency. Lets us rank the "Needs you" feed and drive urgency.
 const prioRank = { P1:0, P2:1, P3:2, P4:3 };
 const prioOf   = (u={}) => /^P[1-4]$/.test(u.priority||"") ? u.priority : (u.urgency==="high"?"P1":u.urgency==="low"?"P3":"P2");
-const stC   = { "Not Started":T.dim, "In Progress":T.blue, "Waiting on Others":T.amber, "Completed":T.green };
-const ttC   = { decision:T.purple, action:T.blue, delegate:T.amber, followup:T.cyan, people:T.green };
 const tyI   = { deep_work:"ti-brain", meeting:"ti-calendar-event", followup:"ti-arrow-back", comms:"ti-mail", buffer:"ti-clock", strategic:"ti-telescope" };
-const tyC   = { deep_work:T.blue, meeting:T.green, followup:T.amber, comms:T.purple, buffer:T.muted, strategic:T.cyan };
 
 const SLASH_COMMANDS = [
   { cmd:"/sync",        desc:"Refresh briefing from Gmail, Calendar and Slack" },
@@ -52,27 +79,28 @@ const mono = "'JetBrains Mono', ui-monospace, monospace";
 const M    = { fontFamily: sans };          // body default — reads like a product
 const MONO = { fontFamily: mono };          // data: numbers, times, small labels
 
-const css = `
+const makeCss = (T) => `
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 @import url('https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css');
 * { box-sizing: border-box; margin: 0; padding: 0 }
 body, #root { background: ${T.bg}; min-height: 100vh; font-family: ${sans};
-  -webkit-font-smoothing: antialiased; color: ${T.text}; letter-spacing: -0.01em; }
+  -webkit-font-smoothing: antialiased; color: ${T.text}; letter-spacing: -0.01em;
+  transition: background .2s ease, color .2s ease; }
 ::-webkit-scrollbar { width: 7px; height: 7px }
 ::-webkit-scrollbar-track { background: transparent }
 ::-webkit-scrollbar-thumb { background: ${T.border}; border-radius: 4px }
 ::-webkit-scrollbar-thumb:hover { background: ${T.borderB} }
 input, select, textarea {
-  background: ${T.bg}; color: ${T.text};
+  background: ${T.bg}; color: ${T.bright};
   border: 1px solid ${T.border}; border-radius: 8px;
   padding: 10px 13px; font-size: 13.5px;
   font-family: ${sans}; outline: none; transition: border .15s, box-shadow .15s;
 }
 input::placeholder { color: ${T.dim} }
-input:focus, select:focus, textarea:focus { border-color: ${T.green}; box-shadow: 0 0 0 3px ${T.green}1a }
+input:focus, select:focus, textarea:focus { border-color: ${T.bright}; box-shadow: 0 0 0 3px ${T.bright}1a }
 button { cursor: pointer; font-family: ${sans} }
-a { color: ${T.green}; text-decoration: none }
-a:hover { opacity: .82 }
+a { color: ${T.bright}; text-decoration: none }
+a:hover { opacity: .7 }
 @keyframes spin    { from { transform: rotate(0)   } to { transform: rotate(360deg) } }
 @keyframes blink   { 0%,100% { opacity:1 } 50% { opacity:0 } }
 @keyframes fadeIn  { from { opacity:0; transform:translateY(-6px) } to { opacity:1; transform:translateY(0) } }
@@ -83,6 +111,8 @@ a:hover { opacity: .82 }
 .rise   { animation: rise .22s cubic-bezier(.2,.7,.3,1) both }
 .hovcard { transition: background .14s, border-color .14s, transform .14s }
 .hovcard:hover { background: ${T.cardHi}; border-color: ${T.borderB} }
+.hovrow { transition: background .12s }
+.hovrow:hover { background: ${T.cardHi}80 }
 @keyframes urgpulse { 0%,100% { box-shadow: 0 0 0 0 ${T.red}00 } 50% { box-shadow: 0 0 0 5px ${T.red}26 } }
 .urgpulse { animation: urgpulse 1.4s ease-in-out infinite }
 `;
@@ -121,6 +151,12 @@ const SlackLnk = ({ url }) => url ? (
   <a href={url} target="_blank" rel="noopener noreferrer"
     style={{ fontSize:11.5, color:T.slack, display:"inline-flex", alignItems:"center", gap:4, marginTop:8, fontWeight:500, ...M }}>
     <i className="ti ti-brand-slack" style={{ fontSize:13 }} />open in Slack <i className="ti ti-arrow-up-right" style={{ fontSize:12 }} />
+  </a>
+) : null;
+const MailLnk = ({ url }) => url ? (
+  <a href={url} target="_blank" rel="noopener noreferrer"
+    style={{ fontSize:11.5, color:T.gmail, display:"inline-flex", alignItems:"center", gap:4, marginTop:8, fontWeight:500, ...M }}>
+    <i className="ti ti-mail" style={{ fontSize:13 }} />open in Gmail <i className="ti ti-arrow-up-right" style={{ fontSize:12 }} />
   </a>
 ) : null;
 const Cursor  = () => (
@@ -277,8 +313,21 @@ export default function App() {
   const [showDirectives, setShowDirectives] = useState(false);
   const [newDirective, setNewDirective] = useState("");
   const [clock,    setClock]    = useState(Date.now());  // ticks the urgency countdown
+  const [theme,    setTheme]    = useState(() => { try { return localStorage.getItem("friday_theme") || "light"; } catch { return "light"; } });
   const chatEndRef = useRef(null);
   const inputRef   = useRef(null);
+
+  // Apply the active palette on every render (idempotent) so T + maps match the theme
+  // before any child component reads them.
+  setPalette(theme);
+  const toggleTheme = () => setTheme(t => t === "dark" ? "light" : "dark");
+  useEffect(() => { try { localStorage.setItem("friday_theme", theme); } catch {} }, [theme]);
+
+  // Editorial section-header tokens (kicker + count over a hairline) — derived from the
+  // live palette so they flip with the theme.
+  const SH  = { display:"flex", alignItems:"baseline", gap:10, marginBottom:16, paddingBottom:11, borderBottom:`1px solid ${T.border}` };
+  const SHk = { fontSize:11, fontWeight:700, color:T.bright, letterSpacing:".15em", textTransform:"uppercase", ...MONO };
+  const SHc = { fontSize:11, color:T.dim, ...MONO };
 
   useEffect(() => { init(); }, []);
 
@@ -555,7 +604,7 @@ export default function App() {
 
   if (loading) return (
     <div style={{ background:T.bg, height:"100vh", display:"flex", alignItems:"center", justifyContent:"center" }}>
-      <style>{css}</style>
+      <style>{makeCss(T)}</style>
       <div style={{ textAlign:"center", ...M }}>
         <div style={{ width:46, height:46, borderRadius:13, margin:"0 auto 16px", background:`linear-gradient(135deg, ${T.green}, ${T.cyan})`,
           display:"flex", alignItems:"center", justifyContent:"center", boxShadow:`0 8px 30px ${T.green}44` }}>
@@ -570,7 +619,7 @@ export default function App() {
 
   if (!data) return (
     <div style={{ background:T.bg, minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", padding:24 }}>
-      <style>{css}</style>
+      <style>{makeCss(T)}</style>
       <div style={{ textAlign:"center", ...M, maxWidth:460, width:"100%" }}>
         <div style={{ width:46, height:46, borderRadius:13, margin:"0 auto 16px", background:`linear-gradient(135deg, ${T.green}, ${T.cyan})`,
           display:"flex", alignItems:"center", justifyContent:"center", boxShadow:`0 8px 30px ${T.green}44` }}>
@@ -793,8 +842,8 @@ export default function App() {
             {emailOpen.length > 0 && (
               <div>
                 <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:8 }}>
-                  <i className="ti ti-mail" style={{ fontSize:13, color:T.cal }} />
-                  <span style={{ fontSize:11, fontWeight:700, color:T.cal, letterSpacing:".07em", ...MONO }}>EMAIL · TO YOU</span>
+                  <i className="ti ti-mail" style={{ fontSize:13, color:T.gmail }} />
+                  <span style={{ fontSize:11, fontWeight:700, color:T.gmail, letterSpacing:".07em", ...MONO }}>EMAIL · TO YOU</span>
                   <span style={{ fontSize:10.5, color:T.dim, ...MONO }}>{eOpen}{loops?.summary?.emailUnread ? ` · ${loops.summary.emailUnread} unread` : ""}</span>
                   {loops?.summary?.emailCcFyi > 0 && (
                     <span title="You're only Cc'd on these — FYI, not on you to reply" style={{ marginLeft:"auto", fontSize:10, color:T.dim, ...MONO }}>
@@ -803,15 +852,20 @@ export default function App() {
                   )}
                 </div>
                 {em.map((t, i) => (
-                  <div key={t.id || i} style={{ background:T.bg, border:`1px solid ${T.border}`, borderLeft:`2px solid ${T.cal}`, borderRadius:8, padding:"9px 12px", marginBottom:5, opacity:t.unread?1:0.65 }}>
-                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, marginBottom:2 }}>
-                      <span style={{ fontSize:12.5, color:T.bright, fontWeight:t.unread?600:500 }}>
-                        {t.unread && <span style={{ color:T.cal, marginRight:5 }}>●</span>}
-                        {(t.from || "").replace(/<.*>/, "").replace(/"/g,"").trim().slice(0, 30)}
-                      </span>
+                  <a key={t.id || i} href={t.gmail_url || undefined} target={t.gmail_url ? "_blank" : undefined} rel="noopener noreferrer"
+                    title={t.gmail_url ? "open in Gmail" : undefined}
+                    style={{ display:"block", textDecoration:"none", cursor:t.gmail_url ? "pointer" : "default" }}>
+                    <div style={{ background:T.bg, border:`1px solid ${T.border}`, borderLeft:`2px solid ${T.gmail}`, borderRadius:8, padding:"9px 12px", marginBottom:5, opacity:t.unread?1:0.65 }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, marginBottom:2 }}>
+                        <span style={{ fontSize:12.5, color:T.bright, fontWeight:t.unread?600:500 }}>
+                          {t.unread && <span style={{ color:T.gmail, marginRight:5 }}>●</span>}
+                          {(t.from || "").replace(/<.*>/, "").replace(/"/g,"").trim().slice(0, 30)}
+                        </span>
+                        {t.gmail_url && <i className="ti ti-arrow-up-right" style={{ fontSize:12, color:T.dim }} />}
+                      </div>
+                      <div style={{ fontSize:12, color:T.text, lineHeight:1.45 }}>{(t.subject || "(no subject)").slice(0, 80)}</div>
                     </div>
-                    <div style={{ fontSize:12, color:T.text, lineHeight:1.45 }}>{(t.subject || "(no subject)").slice(0, 80)}</div>
-                  </div>
+                  </a>
                 ))}
               </div>
             )}
@@ -880,7 +934,7 @@ export default function App() {
 
   return (
     <div style={{ background:T.bg, minHeight:"100vh", padding:"24px clamp(16px,4vw,40px) 110px", width:"100%", maxWidth:1480, margin:"0 auto", ...M }}>
-      <style>{css}</style>
+      <style>{makeCss(T)}</style>
 
       {/* Floating Learn-today — out of the way; glance only if you want to */}
       {learn && learn.title && (
@@ -1015,107 +1069,79 @@ export default function App() {
         )}
       </div>
 
-      {/* Top bar — brand + connections (left), pulse + focus + sync (right) */}
-      <div style={{ display:"flex", alignItems:"center", gap:14, flexWrap:"wrap", marginBottom:18 }}>
-        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-          <div style={{ width:30, height:30, borderRadius:9, background:`linear-gradient(135deg, ${T.green}, ${T.cyan})`,
-            display:"flex", alignItems:"center", justifyContent:"center", boxShadow:`0 4px 16px ${T.green}33` }}>
-            <span style={{ fontSize:15, fontWeight:800, color:T.bg }}>F</span>
+      {/* Masthead */}
+      <header style={{ display:"flex", alignItems:"center", gap:13, flexWrap:"wrap",
+        paddingBottom:15, borderBottom:`1px solid ${T.border}`, marginBottom:24 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:11 }}>
+          <div style={{ width:29, height:29, borderRadius:8, background:T.bright,
+            display:"flex", alignItems:"center", justifyContent:"center" }}>
+            <span style={{ fontSize:14, fontWeight:800, color:T.bg }}>F</span>
           </div>
-          <div>
-            <div style={{ fontSize:14.5, fontWeight:700, color:T.bright, lineHeight:1 }}>FRIDAY</div>
-            <div style={{ fontSize:10, color:T.dim, marginTop:2, ...MONO }}>{dateStr} · {timeStr}</div>
-          </div>
+          <div style={{ fontSize:16, fontWeight:700, color:T.bright, letterSpacing:"-0.02em" }}>FRIDAY</div>
+          <span style={{ fontSize:11.5, color:T.dim, marginLeft:2, ...MONO }}>{dateStr} · {timeStr}</span>
         </div>
+
+        <span style={{ flex:1, minWidth:12 }} />
+
         {/* connection dots */}
-        <div style={{ display:"flex", alignItems:"center", gap:10, paddingLeft:6, borderLeft:`1px solid ${T.border}` }}>
+        <div style={{ display:"flex", alignItems:"center", gap:11 }}>
           {SERVICES.map(s => {
             const st = conns.find(c => c.provider === s.provider) || {};
             const on = !!st.connected;
             return (
               <span key={s.key} title={`${s.label}: ${on ? "connected" : "tap to connect"}`}
                 onClick={() => on ? doDisconnect(s.provider) : doConnect(s.provider)}
-                style={{ display:"inline-flex", alignItems:"center", gap:4, cursor:"pointer", color:on?T.muted:T.dim }}>
-                <span style={{ width:7, height:7, borderRadius:"50%", background:on?s.color:T.border, boxShadow:on?`0 0 6px ${s.color}88`:"none" }} />
+                style={{ display:"inline-flex", alignItems:"center", gap:5, cursor:"pointer", color:on?T.muted:T.dim }}>
+                <span style={{ width:6, height:6, borderRadius:"50%", background:on?T.bright:T.border }} />
                 <i className={`ti ${s.icon}`} style={{ fontSize:14 }} />
               </span>
             );
           })}
         </div>
-
-        <span style={{ flex:1, minWidth:12 }} />
-
-        {/* pulse chips */}
-        {[[sOpen,"Slack",T.slack,"ti-brand-slack"],
-          [eOpen,"Email",T.cal,"ti-mail"],
-          [meets,"Meets",T.green,"ti-calendar-event"],
-          [fups,"Follow-ups",T.amber,"ti-user-up"]]
-          .map(([v,l,c,ic]) => (
-            <div key={l} title={l} className="hovcard" style={{ display:"inline-flex", alignItems:"center", gap:6,
-              background:T.card, border:`1px solid ${T.border}`, borderRadius:10, padding:"6px 11px" }}>
-              <i className={`ti ${ic}`} style={{ fontSize:13, color:c }} />
-              <span style={{ fontSize:15, fontWeight:700, color:v>0?T.bright:T.dim, ...MONO }}>{v}</span>
-              <span style={{ fontSize:11, color:T.muted }}>{l}</span>
-            </div>
-          ))}
-        {focusScore != null && <FocusScore score={focusScore} />}
-        <button onClick={doSync} disabled={syncing} style={{ fontSize:12, padding:"9px 16px", fontWeight:600,
-          background:T.green, border:"none", borderRadius:10, color:T.bg, display:"inline-flex", alignItems:"center", gap:6,
+        {/* theme toggle */}
+        <button onClick={toggleTheme} title={theme==="dark"?"Switch to light":"Switch to dark"}
+          style={{ width:34, height:34, borderRadius:9, border:`1px solid ${T.border}`, background:"transparent",
+            color:T.muted, display:"inline-flex", alignItems:"center", justifyContent:"center" }}>
+          <i className={`ti ${theme==="dark"?"ti-sun":"ti-moon"}`} style={{ fontSize:16 }} />
+        </button>
+        <button onClick={doSync} disabled={syncing} style={{ fontSize:12.5, padding:"8px 16px", fontWeight:600,
+          background:T.bright, border:"none", borderRadius:9, color:T.bg, display:"inline-flex", alignItems:"center", gap:6,
           opacity:syncing?0.6:1, ...M }}>
           <i className={`ti ti-refresh ${syncing ? "spin" : ""}`} style={{ fontSize:13 }} />
           {syncing ? "syncing…" : "Sync"}
         </button>
-      </div>
+      </header>
 
-      {/* ── Urgency engine — what needs you now (priority-ranked), with the next meeting as a time cue ── */}
-      {!offHours && (topItem || nextEdge) && (
-        <div className={hot ? "urgpulse" : ""} style={{ marginBottom:16, borderRadius:14, overflow:"hidden",
-          background:T.card, border:`1.5px solid ${heat}${heat===T.green?"55":"99"}` }}>
-          <div style={{ display:"flex", alignItems:"center", gap:14, padding:"14px 18px" }}>
-            {topItem ? (
-              <span style={{ fontSize:13, fontWeight:800, color:prioC[topItem.prio]?.[0], background:prioC[topItem.prio]?.[1],
-                border:`1px solid ${prioC[topItem.prio]?.[0]}55`, borderRadius:8, padding:"5px 9px", flexShrink:0, ...MONO }}>{topItem.prio}</span>
-            ) : (
-              <i className="ti ti-bolt" style={{ fontSize:22, color:heat, flexShrink:0 }} />
-            )}
-            <div style={{ flex:1, minWidth:0 }}>
-              <div style={{ fontSize:10, fontWeight:700, color:heat, letterSpacing:".18em", display:"flex", alignItems:"center", gap:7, ...MONO }}>
-                {topItem ? (hot ? "⚠ DO THIS NOW" : "DO THIS NOW") : "NEXT HARD EDGE"}
-                {topItem?.source && <i className={`ti ${srcStyle[topItem.source]?.icon || "ti-pencil"}`} style={{ fontSize:12, color:(srcStyle[topItem.source]||srcStyle.manual).color }} />}
-              </div>
-              <div style={{ fontSize:16, fontWeight:600, color:T.bright, marginTop:3, lineHeight:1.25, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
-                {topItem ? topItem.title : nextEdge.label}
-              </div>
-              {topItem && nextEdge && (
-                <div style={{ fontSize:11.5, color:T.dim, marginTop:4, ...MONO }}>
-                  next: {nextEdge.label} · {edgeAt}
-                </div>
-              )}
-            </div>
-            {nextEdge && (
-              <div style={{ textAlign:"right", flexShrink:0 }}>
-                <div style={{ fontSize:28, fontWeight:800, color: edgeMins<=15?T.red:edgeMins<=60?T.amber:T.muted, lineHeight:1, letterSpacing:"-0.02em", ...MONO }}>{fmtLeft(edgeMins)}</div>
-                <div style={{ fontSize:9, color:T.dim, letterSpacing:".12em", marginTop:3, ...MONO }}>TO NEXT MEET</div>
-              </div>
-            )}
-          </div>
+      {/* Contextual urgency strip — appears only when something is truly imminent or a P1 is hot */}
+      {!offHours && hot && (topItem || nextEdge) && (
+        <div className="urgpulse" style={{ display:"flex", alignItems:"center", gap:11, marginBottom:18,
+          background:T.redD, border:`1px solid ${T.red}55`, borderRadius:10, padding:"11px 15px" }}>
+          <i className="ti ti-bolt" style={{ fontSize:16, color:T.red, flexShrink:0 }} />
+          <span style={{ flex:1, minWidth:0, fontSize:13.5, fontWeight:600, color:T.bright, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+            {topItem ? topItem.title : nextEdge.label}
+          </span>
+          {nextEdge && (
+            <span style={{ fontSize:13, fontWeight:700, color:T.red, flexShrink:0, ...MONO }}>{fmtLeft(edgeMins)} · {nextEdge.label}</span>
+          )}
         </div>
       )}
 
-      {/* Hero — the one thing that matters today */}
-      <div style={{ marginBottom:20 }}>
-        <div style={{ fontSize:10.5, fontWeight:600, color:T.green, letterSpacing:".16em", marginBottom:8, ...MONO }}>FOCUS TODAY</div>
-        <div style={{ fontSize:22, fontWeight:600, color:T.bright, lineHeight:1.35, letterSpacing:"-0.02em" }}>
+      {/* Lead — today's focus */}
+      <section style={{ marginBottom:28 }}>
+        <div style={{ display:"flex", alignItems:"baseline", gap:10, marginBottom:9 }}>
+          <span style={{ fontSize:11, fontWeight:600, color:T.muted, letterSpacing:".16em", textTransform:"uppercase", ...MONO }}>Today's Focus</span>
+          <span style={{ fontSize:11, color:T.dim, ...MONO }}>as of {timeStr}</span>
+        </div>
+        <div style={{ fontSize:27, fontWeight:600, color:T.bright, lineHeight:1.28, letterSpacing:"-0.025em", maxWidth:900 }}>
           {summary?.focus_of_day || "Ready when you are."}{!summary?.focus_of_day && <Cursor />}
         </div>
         {summary?.risk_flag && (
-          <div style={{ fontSize:12.5, color:T.red, marginTop:12, display:"flex", alignItems:"flex-start", gap:8,
-            background:T.redD, border:`1px solid ${T.red}33`, borderRadius:9, padding:"10px 13px", lineHeight:1.5 }}>
-            <i className="ti ti-alert-triangle" style={{ fontSize:14, marginTop:1, flexShrink:0 }} />
+          <div style={{ fontSize:13, color:T.red, marginTop:14, display:"flex", alignItems:"flex-start", gap:8, lineHeight:1.55, maxWidth:900 }}>
+            <i className="ti ti-alert-triangle" style={{ fontSize:14, marginTop:2, flexShrink:0 }} />
             <span><b style={{ fontWeight:600 }}>Risk · </b>{summary.risk_flag}</span>
           </div>
         )}
-      </div>
+      </section>
 
       {banner && (
         <div style={{ fontSize:12, marginBottom:12, padding:"8px 12px", borderRadius:5,
@@ -1139,117 +1165,119 @@ export default function App() {
         </div>
       )}
 
-      {/* ── Cockpit: everything on one screen ── */}
-      <div style={{ display:"grid", gridTemplateColumns:"minmax(0,1.55fr) minmax(0,1fr)", gap:16, alignItems:"start" }}>
+      {/* ── Main: Needs you  |  The day ── */}
+      <div style={{ display:"grid", gridTemplateColumns:"minmax(0,1.6fr) minmax(0,1fr)", gap:"40px", alignItems:"start" }}>
 
-      {/* LEFT — what needs you */}
-      <div style={{ display:"flex", flexDirection:"column", gap:16, minWidth:0 }}>
-        <Panel title="Needs you" icon="ti-flame" accent={T.red} count={(briefing?.critical_updates||[]).length}>
+        {/* NEEDS YOU — headline feed */}
+        <div style={{ minWidth:0 }}>
+          <div style={SH}>
+            <span style={SHk}>Needs You</span>
+            <span style={SHc}>{importantItems.length}</span>
+          </div>
+          {importantItems.length === 0 && <Note>nothing needs you right now</Note>}
           {importantItems.map((u, i) => {
             const pc = prioC[u.prio] || prioC.P3;
             const key = `cu-${u.id ?? i}`;
-            const open = expanded[key] ?? (i === 0); // first one open, rest collapsed
+            const open = expanded[key] ?? (i === 0);
             return (
-              <div key={key} style={{ background:T.card, border:`1px solid ${T.border}`, borderLeft:`2px solid ${pc[0]}`,
-                borderRadius:6, marginBottom:6, overflow:"hidden" }}>
+              <div key={key} className="hovrow" style={{ borderBottom:`1px solid ${T.border}` }}>
                 <div onClick={() => setExpanded(e => ({ ...e, [key]: !open }))}
-                  style={{ display:"flex", alignItems:"center", gap:10, padding:"11px 14px", cursor:"pointer" }}>
-                  <span title={`priority ${u.prio}`} style={{ fontSize:10.5, fontWeight:800, color:pc[0], background:pc[1],
-                    border:`1px solid ${pc[0]}44`, borderRadius:6, padding:"2px 6px", flexShrink:0, ...MONO }}>{u.prio}</span>
-                  <span style={{ flex:1, fontSize:14, fontWeight:600, color:T.bright, lineHeight:1.35 }}>{u.title}</span>
-                  <i className={`ti ${srcStyle[u.source]?.icon || "ti-pencil"}`} style={{ fontSize:13, color:(srcStyle[u.source]||srcStyle.manual).color, flexShrink:0 }} />
-                  <i className={`ti ti-chevron-${open?"up":"down"}`} style={{ fontSize:14, color:T.dim, flexShrink:0 }} />
-                </div>
-                {open && (
-                  <div style={{ padding:"0 14px 12px 31px" }}>
-                    <div style={{ fontSize:13, color:T.text, lineHeight:1.7 }}>{u.detail}</div>
-                    {u.slack_url && <SlackLnk url={u.slack_url} />}
+                  style={{ display:"flex", alignItems:"flex-start", gap:13, padding:"15px 2px", cursor:"pointer" }}>
+                  <span title={`priority ${u.prio}`} style={{ fontSize:11, fontWeight:700, color:pc[0], flexShrink:0, marginTop:2, width:22, ...MONO }}>{u.prio}</span>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:15.5, fontWeight:600, color:T.bright, lineHeight:1.38 }}>{u.title}</div>
+                    {!open && <div style={{ fontSize:12.5, color:T.dim, lineHeight:1.5, marginTop:3, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{u.detail}</div>}
+                    {open && (
+                      <div style={{ marginTop:7 }}>
+                        <div style={{ fontSize:13.5, color:T.text, lineHeight:1.65 }}>{u.detail}</div>
+                        {u.slack_url && <SlackLnk url={u.slack_url} />}
+                        {u.gmail_url && <MailLnk url={u.gmail_url} />}
+                      </div>
+                    )}
                   </div>
-                )}
+                  <i className={`ti ${srcStyle[u.source]?.icon || "ti-pencil"}`} title={u.source} style={{ fontSize:13, color:(srcStyle[u.source]||srcStyle.manual).color, flexShrink:0, marginTop:3 }} />
+                  <i className={`ti ti-chevron-${open?"up":"down"}`} style={{ fontSize:14, color:T.dim, flexShrink:0, marginTop:3 }} />
+                </div>
               </div>
             );
           })}
-          <div style={{ height:18 }} />
+        </div>
 
-          <Lbl>decisions needed</Lbl>
-          {!(briefing?.decisions_needed?.length)
-            ? <Note>no pending decisions</Note>
-            : briefing.decisions_needed.map((d, i) => {
-                const key = `dn-${i}`;
-                const open = expanded[key] ?? false;
-                return (
-                  <div key={i} style={{ background:T.card, border:`1px solid ${T.border}`, borderLeft:`2px solid ${T.purple}`,
-                    borderRadius:6, marginBottom:6, overflow:"hidden" }}>
-                    <div onClick={() => setExpanded(e => ({ ...e, [key]: !open }))}
-                      style={{ display:"flex", alignItems:"center", gap:10, padding:"11px 14px", cursor:"pointer" }}>
-                      <i className="ti ti-help-circle" style={{ fontSize:14, color:T.purple, flexShrink:0 }} />
-                      <span style={{ flex:1, fontSize:14, fontWeight:600, color:T.bright, lineHeight:1.35 }}>{d.title}</span>
-                      {d.from && <span style={{ fontSize:11, color:T.dim, flexShrink:0, ...M }}>{d.from}</span>}
-                      <i className={`ti ti-chevron-${open?"up":"down"}`} style={{ fontSize:14, color:T.dim, flexShrink:0 }} />
-                    </div>
-                    {open && <div style={{ padding:"0 14px 12px 38px", fontSize:13, color:T.text, lineHeight:1.6 }}>{d.context}</div>}
-                  </div>
-                );
-              })
-          }
-          <div style={{ height:18 }} />
-
-          <Lbl>stakeholder follow-ups</Lbl>
-          {(briefing?.stakeholder_followups || []).map((f, i) => (
-            <Blk key={i} style={{ display:"flex", gap:12, alignItems:"flex-start" }}>
-              <div style={{ fontSize:12, fontWeight:700, color:T.cyan, background:T.cyanD,
-                padding:"5px 8px", borderRadius:3, flexShrink:0, ...M }}>
-                {(f.person || "?").split(" ").map(w => w[0]).join("").slice(0, 2)}
+        {/* THE DAY — schedule + numbers */}
+        <div style={{ minWidth:0, position:"sticky", top:18 }}>
+          <div style={SH}>
+            <span style={SHk}>The Day</span>
+            <span style={{ flex:1 }} />
+            <button onClick={refreshLoops} disabled={loopsBusy} title="Re-scan"
+              style={{ background:"transparent", border:"none", color:T.dim, cursor:"pointer" }}>
+              <i className={`ti ti-refresh ${loopsBusy?"spin":""}`} style={{ fontSize:13 }} />
+            </button>
+          </div>
+          {renderSchedule()}
+          <div style={{ marginTop:18, paddingTop:16, borderTop:`1px solid ${T.border}`,
+            display:"grid", gridTemplateColumns:"1fr 1fr", gap:"13px 10px" }}>
+            {[[sOpen,"Slack"],[eOpen,"Email"],[meets,"Meets"],[fups,"Follow-ups"]].map(([v,l]) => (
+              <div key={l} style={{ display:"flex", alignItems:"baseline", gap:7 }}>
+                <span style={{ fontSize:21, fontWeight:700, color:v>0?T.bright:T.dim, ...MONO }}>{v}</span>
+                <span style={{ fontSize:11.5, color:T.muted }}>{l}</span>
               </div>
-              <div style={{ flex:1 }}>
-                <div style={{ fontSize:14, fontWeight:600, color:T.bright, marginBottom:3 }}>{f.person}</div>
-                <div style={{ fontSize:12, color:T.text, marginBottom:3 }}>{f.topic}</div>
-                <div style={{ fontSize:11, color:T.dim }}>since {f.waiting_since} · via {f.channel}</div>
-                {f.slack_url && <SlackLnk url={f.slack_url} />}
-              </div>
-            </Blk>
-          ))}
-        </Panel>
+            ))}
+          </div>
+        </div>
       </div>
 
-      {/* RIGHT — switchable cockpit: one section at a time, picked from the icon rail */}
-      <div style={{ display:"flex", gap:10, alignItems:"flex-start", minWidth:0 }}>
-        <div style={{ flex:1, minWidth:0 }}>
-          {rightTab === "today" && (
-            <Panel title="Today" icon="ti-calendar" accent={T.green}>{renderSchedule()}</Panel>
-          )}
-          {rightTab === "loops" && (
-            <Panel title="Open loops" icon="ti-target" accent={T.slack} count={sOpen+mOpen}
-              action={<button onClick={refreshLoops} disabled={loopsBusy} title="Re-scan"
-                style={{ background:"transparent", border:"none", color:T.dim, cursor:"pointer" }}>
-                <i className={`ti ti-refresh ${loopsBusy?"spin":""}`} style={{ fontSize:14 }} /></button>}>
-              {renderLoops()}
-            </Panel>
-          )}
-          {rightTab === "standup" && (
-            <Panel title="Standup" icon="ti-presentation" accent={T.blue}>{renderStandup()}</Panel>
-          )}
+      {/* ── Open loops ── */}
+      <section style={{ marginTop:36, paddingTop:24, borderTop:`1px solid ${T.border}` }}>
+        <div style={SH}><span style={SHk}>Open Loops</span><span style={SHc}>{sOpen+eOpen+mOpen}</span></div>
+        {renderLoops()}
+      </section>
+
+      {/* ── Decisions · Standup · Stakeholders ── */}
+      <div style={{ marginTop:36, paddingTop:24, borderTop:`1px solid ${T.border}`,
+        display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(255px, 1fr))", gap:"40px", alignItems:"start" }}>
+
+        <div style={{ minWidth:0 }}>
+          <div style={SH}><span style={SHk}>Decisions</span>{briefing?.decisions_needed?.length>0 && <span style={SHc}>{briefing.decisions_needed.length}</span>}</div>
+          {!(briefing?.decisions_needed?.length) ? <Note>no pending decisions</Note> :
+            briefing.decisions_needed.map((d, i) => {
+              const key = `dn-${i}`; const open = expanded[key] ?? false;
+              return (
+                <div key={i} style={{ borderBottom:`1px solid ${T.border}` }}>
+                  <div onClick={() => setExpanded(e => ({ ...e, [key]: !open }))}
+                    style={{ display:"flex", alignItems:"flex-start", gap:10, padding:"13px 2px", cursor:"pointer" }}>
+                    <span style={{ flex:1, fontSize:13.5, fontWeight:600, color:T.bright, lineHeight:1.4 }}>{d.title}</span>
+                    {d.from && <span style={{ fontSize:11, color:T.dim, flexShrink:0, ...M }}>{d.from}</span>}
+                    <i className={`ti ti-chevron-${open?"up":"down"}`} style={{ fontSize:13, color:T.dim, flexShrink:0, marginTop:2 }} />
+                  </div>
+                  {open && <div style={{ padding:"0 2px 13px", fontSize:13, color:T.text, lineHeight:1.6 }}>{d.context}</div>}
+                </div>
+              );
+            })}
         </div>
-        {/* vertical icon rail */}
-        <div style={{ position:"sticky", top:18, display:"flex", flexDirection:"column", gap:7, flexShrink:0 }}>
-          {[["today","ti-calendar",meets,T.green],["loops","ti-target",sOpen+mOpen,T.slack],["standup","ti-presentation",0,T.blue]].map(([k,icon,badge,color]) => {
-            const on = rightTab === k;
-            return (
-              <button key={k} onClick={() => { setRightTab(k); setShowAll({}); }} title={k}
-                style={{ width:46, height:46, borderRadius:12, position:"relative", cursor:"pointer",
-                  background:on?T.card:"transparent", border:`1px solid ${on?T.borderB:"transparent"}`,
-                  color:on?color:T.muted, display:"flex", alignItems:"center", justifyContent:"center", transition:"all .14s" }}>
-                <i className={`ti ${icon}`} style={{ fontSize:20 }} />
-                {badge > 0 && (
-                  <span style={{ position:"absolute", top:4, right:4, fontSize:9, fontWeight:700, color:T.bg,
-                    background:color, borderRadius:10, padding:"0 4px", minWidth:14, textAlign:"center", ...MONO }}>{badge}</span>
-                )}
-              </button>
-            );
-          })}
+
+        <div style={{ minWidth:0 }}>
+          <div style={SH}><span style={SHk}>Standup</span></div>
+          {renderStandup()}
         </div>
-      </div>{/* end RIGHT */}
-      </div>{/* end cockpit grid */}
+
+        <div style={{ minWidth:0 }}>
+          <div style={SH}><span style={SHk}>Stakeholders Waiting</span></div>
+          {!(briefing?.stakeholder_followups?.length) ? <Note>nobody's blocked on you</Note> :
+            briefing.stakeholder_followups.map((f, i) => (
+              <div key={i} style={{ display:"flex", gap:11, alignItems:"flex-start", padding:"12px 2px", borderBottom:`1px solid ${T.border}` }}>
+                <div style={{ fontSize:11, fontWeight:700, color:T.muted, background:T.cardHi, padding:"4px 7px", borderRadius:5, flexShrink:0, ...MONO }}>
+                  {(f.person || "?").split(" ").map(w => w[0]).join("").slice(0, 2)}
+                </div>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:13.5, fontWeight:600, color:T.bright }}>{f.person}</div>
+                  <div style={{ fontSize:12.5, color:T.text, margin:"2px 0", lineHeight:1.45 }}>{f.topic}</div>
+                  <div style={{ fontSize:11, color:T.dim }}>since {f.waiting_since} · via {f.channel}</div>
+                  {f.slack_url && <SlackLnk url={f.slack_url} />}
+                </div>
+              </div>
+            ))}
+        </div>
+      </div>{/* end bottom sections */}
 
       {/* Footer */}
       <div style={{ marginTop:24, paddingTop:14, borderTop:`1px solid ${T.border}`, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10 }}>

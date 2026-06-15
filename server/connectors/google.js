@@ -118,6 +118,7 @@ const fetchGmail = async (max = 15) => {
           const inCc = !!myEmail && decodeHeader(h, "Cc").toLowerCase().includes(myEmail);
           return {
             id,
+            gmail_url: `https://mail.google.com/mail/u/0/#all/${id}`,
             from: decodeHeader(h, "From"),
             subject: decodeHeader(h, "Subject"),
             date: decodeHeader(h, "Date"),
@@ -202,6 +203,7 @@ const fetchGmailOpenLoops = async (days = 4, max = 25) => {
           const labels  = userLabelNames(msgs.flatMap((m) => m.labelIds || []), labelMap);  // his triage labels on the thread
           return {
             id,
+            gmail_url: `https://mail.google.com/mail/u/0/#all/${id}`,
             from: decodeHeader(first.payload.headers || [], "From"),
             subject: decodeHeader(first.payload.headers || [], "Subject"),
             snippet: last.snippet || r.data.snippet || "",

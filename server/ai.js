@@ -197,11 +197,14 @@ const clip = (s, n) => { s = String(s || "").replace(/\s+/g, " ").trim(); return
 const compactGmail = (mail = [], max = 30) => {
   // Addressed-to-me first (those can need a reply); tag each so the model can tell
   // a real ask from FYI. Cc-only is low-signal noise unless it's a clear escalation.
-  const ranked = [...mail].sort((a, b) => (b.addressedToMe ? 1 : 0) - (a.addressedToMe ? 1 : 0));
+  // _ref keeps the ORIGINAL index so the model can point a card back at the exact
+  // email; we map that ref → real gmail_url server-side after generation.
+  const ranked = mail.map((m, i) => ({ ...m, _ref: `g${i}` }))
+    .sort((a, b) => (b.addressedToMe ? 1 : 0) - (a.addressedToMe ? 1 : 0));
   return (ranked.slice(0, max).map(m => {
     const tag = m.addressedToMe ? "[TO-ME]" : m.ccOnly ? "[cc/fyi]" : "";
     const lbl = m.labels?.length ? ` {${m.labels.join(", ")}}` : "";
-    return `- ${tag} ${clip(m.from, 50)} | ${clip(m.subject, 90)} | ${clip(m.snippet, 140)}${lbl}`;
+    return `- [${m._ref}] ${tag} ${clip(m.from, 50)} | ${clip(m.subject, 90)} | ${clip(m.snippet, 140)}${lbl}`;
   }).join("\n")) + (mail.length > max ? `\n  (+${mail.length - max} more)` : "") || "  (none)";
 };
 
@@ -211,8 +214,8 @@ const compactCalendar = (cal = []) =>
   ).join("\n")) || "  (none)";
 
 const compactSlack = (slack = [], max = 25) =>
-  (slack.slice(0, max).map(m =>
-    `- #${clip(m.channel, 30)} @${clip(m.user, 24)}: ${clip(m.text, 160)}`
+  (slack.slice(0, max).map((m, i) =>
+    `- [s${i}] #${clip(m.channel, 30)} @${clip(m.user, 24)}: ${clip(m.text, 160)}`
   ).join("\n")) + (slack.length > max ? `\n  (+${slack.length - max} more)` : "") || "  (none)";
 
 const compactTasks = (tasks = []) =>
@@ -257,7 +260,7 @@ CARRY-FORWARD (incomplete tasks from yesterday):
 ${compactTasks(carryForwardTasks)}
 
 == HOW TO BUILD EACH SECTION (follow precisely) ==
-1. briefing.critical_updates — 3 to 5 items that genuinely need his attention today, drawn PRIMARILY from Slack and Gmail signals (his real channels) plus the standing priorities. Each: a specific title and a detail of 1-2 full sentences with the real context (who, which program/batch, why it matters, what's at stake). source = "slack" | "gmail" | "calendar" | "manual" (where it came from). priority = "P1" (must act today — blocking someone, a deadline, a leadership/founder ask, money or a student at risk) | "P2" (important, act soon) | "P3" (worth knowing, not urgent). urgency = "high" | "medium" | "low" (mirror the priority). RANK these so the most important is first.
+1. briefing.critical_updates — 3 to 5 items that genuinely need his attention today, drawn PRIMARILY from Slack and Gmail signals (his real channels) plus the standing priorities. Each: a specific title and a detail of 1-2 full sentences with the real context (who, which program/batch, why it matters, what's at stake). source = "slack" | "gmail" | "calendar" | "manual" (where it came from). ref (REQUIRED, do not omit) = the bracket tag printed at the very start of the source line this item is based on. Every GMAIL and SLACK line below is prefixed with its tag like "[g3]" or "[s2]" — copy that tag's inner value VERBATIM into ref (e.g. ref:"g3"). Set ref:"" ONLY when the item comes from a calendar event, a manual note, or a standing priority (nothing to link). This builds the deep-link to the original message; an item with source gmail/slack and an empty ref is a bug. priority = "P1" (must act today — blocking someone, a deadline, a leadership/founder ask, money or a student at risk) | "P2" (important, act soon) | "P3" (worth knowing, not urgent). urgency = "high" | "medium" | "low" (mirror the priority). RANK these so the most important is first.
 2. briefing.decisions_needed — decisions only HE can make. Give title, context (the tradeoff / why it's stuck), and "from" (who's asking).
 3. briefing.stakeholder_followups — people waiting on him: person, channel, waiting_since, topic. Build this PRIMARILY from the OPEN LOOPS list (those are confirmed unanswered). Lead with the Slack open loops; include only the emails that genuinely need a personal reply. Drop anything that's just an FYI/notification.
 4. standup.leadership — what he reports UP to Keshav/Aman. yesterday = concrete things shipped; today = what he is personally driving; blockers = what's stuck + who he needs. 3 specific bullets each (not one-liners).
@@ -274,7 +277,7 @@ ${compactTasks(carryForwardTasks)}
 
 Return ONLY valid JSON, no markdown fences, exactly this shape:
 {
-  "briefing": { "critical_updates": [{"id","title","detail","source","priority","urgency","slack_url"}], "decisions_needed": [{"title","context","from"}], "stakeholder_followups": [{"person","channel","waiting_since","topic","slack_url"}] },
+  "briefing": { "critical_updates": [{"id":"cu-1","title":"…","detail":"…","source":"gmail","priority":"P1","urgency":"high","ref":"g3"}], "decisions_needed": [{"title","context","from"}], "stakeholder_followups": [{"person","channel","waiting_since","topic","slack_url"}] },
   "standup": { "leadership": {"yesterday":[],"today":[],"blockers":[]}, "team": {"yesterday":[],"today":[],"delegate":[]} },
   "action_items": [{"id","task","owner","due","status","priority","priority_reason","source","type"}],
   "schedule": [{"time","block","type","notes"}],
@@ -288,7 +291,21 @@ Return ONLY valid JSON, no markdown fences, exactly this shape:
   const start = clean.indexOf("{");
   const end = clean.lastIndexOf("}");
   const jsonStr = start >= 0 && end > start ? clean.slice(start, end + 1) : clean;
-  return JSON.parse(jsonStr);
+  const parsed = JSON.parse(jsonStr);
+
+  // Deep-link each critical_update back to its real source message via the ref the
+  // model echoed. Deterministic — the URL comes from our data, never invented by Claude.
+  try {
+    const refMap = {};
+    (slackData || []).forEach((m, i) => { if (m.slack_url) refMap[`s${i}`] = { slack_url: m.slack_url }; });
+    (gmailData || []).forEach((m, i) => { if (m.gmail_url) refMap[`g${i}`] = { gmail_url: m.gmail_url }; });
+    for (const u of (parsed?.briefing?.critical_updates || [])) {
+      const link = u.ref && refMap[u.ref];
+      if (link) Object.assign(u, link);
+    }
+  } catch { /* non-fatal — links are a nicety, never block the briefing */ }
+
+  return parsed;
 };
 
 module.exports = { chat, generateBriefing, buildSystemPrompt, ClaudeLimitError, OfflineError, classifyClaudeError, setUsageSink };
