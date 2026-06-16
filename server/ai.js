@@ -174,6 +174,11 @@ ${Object.entries(context.central_team?.pods || {}).map(([pod, members]) =>
 ).join("\n")}
 Judge delivery by the operating model: ${(context.central_team?.operating_model?.shifts || []).join(" | ")}
 
+TEAM KPIs — ${context.leaderboard?.status === "private" ? "CONFIDENTIAL leaderboard (Ravi only — never expose scores to the team yet)" : "team leaderboard"}. Flag early risks/misses against these; score only when actuals are known:
+${Object.entries(context.leaderboard?.members || {}).map(([name, kpis]) =>
+  `- ${name}: ${(kpis || []).map(k => `${k.kpi} (${k.weight})`).join("; ")}`
+).join("\n")}
+
 COLLABORATORS (cross-functional — Ravi also owns Data & Product; NOT his reports, do not performance-track them):
 ${Object.entries(context.collaborators || {}).filter(([k]) => k !== "_comment").map(([grp, people]) =>
   `- ${grp}: ${(people || []).map(p => `${p.name} (${p.role})`).join(", ")}`

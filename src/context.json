@@ -13,6 +13,34 @@
     { "name": "Nischal Shetty", "role": "Director - Curriculum", "interaction": "as needed" },
     { "name": "Naveen M", "role": "Analytics Lead", "interaction": "as needed", "note": "External contract employee; senior to Ravi — treat his asks as coming from a senior." }
   ],
+  "leaderboard": {
+    "_comment": "Central team monthly KPI leaderboard — the concrete measure behind the ATC performance model. CONFIDENTIAL: visible to Ravi only for now; to be shared with the team later. Each member's weights total 100. FRIDAY: flag early risks/misses against these from Slack/email signals, and score per the bands when actuals are known. Do NOT draft or send anything that exposes these scores to the team until Ravi says it is shared.",
+    "status": "private",
+    "members": {
+      "Rajesh": [
+        { "kpi": "Batch mapping within 24hrs of cohort creation", "weight": 60, "bands": "Full 60: 100% mapped on time | Partial 30: 90–99% | Miss 0: <90%" },
+        { "kpi": "Workflow changes within 24hrs (batch transfer / section creation / student details change / lecture edit)", "weight": 40, "bands": "Full 40: 100% on time | Partial 20: 60–90% | Miss 0: <60%" }
+      ],
+      "Rahul": [
+        { "kpi": "Lecture creation — 0 deviations 72hrs before schedule date", "weight": 30, "bands": "Full 30: 0 deviations | Partial 15: 1–2 | Miss 0: ≥3" },
+        { "kpi": "Payout to finance by 5th with 0 errors", "weight": 40, "bands": "Full 40: by 5th, 0 errors | Partial 20: by 5th, 1 error | Miss 0: late or ≥2 errors" },
+        { "kpi": "Evaluation scores released within 5 days from conclude date (days TBD)", "weight": 30, "bands": "Full 30: 100% on time | Partial 15: 60–90% | Miss 0: <60%" }
+      ],
+      "Raza": [
+        { "kpi": "0 kits pending within 2 days of fee payment + 0 kits without tracking ID after 7 days", "weight": 30, "bands": "Full 30: 0 pending & 0 missing tracking IDs | Partial 15: 1–2 logged exceptions | Miss 0: ≥3 or no tracking" },
+        { "kpi": "Post-batch data handover within 2 days of final scores release (days TBD)", "weight": 30, "bands": "Full 30: 100% on time | Partial 15: 60–90% | Miss 0: <60%" },
+        { "kpi": "Scorecards & certificates issued within 15 days of final evaluation (days TBD)", "weight": 40, "bands": "Full 40: 100% on time | Partial 20: 60–90% | Miss 0: <60%" }
+      ],
+      "Yashas": [
+        { "kpi": "All agreements uploaded before counselling within 24hrs of cohort creation with 0 errors", "weight": 50, "bands": "Full 50: 100% on time, 0 errors | Partial 25: 60–90% or 1 error | Miss 0: <60% or ≥2 errors" },
+        { "kpi": "100% batches with finalised calendar 10 days before batch start", "weight": 50, "bands": "Full 50: 100% on time | Partial 25: 60–90% | Miss 0: <60%" }
+      ],
+      "Aravind": [
+        { "kpi": "100% SoT completed within 48hrs of new batch creation trigger", "weight": 70, "bands": "Full 70: 100% on time | Partial 35: 60–90% | Miss 0: <60%" },
+        { "kpi": "Every product issue logged with resolution type (tech fix or workaround) within 24hrs", "weight": 30, "bands": "Full 30: 100% on time | Partial 15: 60–90% | Miss 0: <60%" }
+      ]
+    }
+  },
   "collaborators": {
     "_comment": "People OUTSIDE Ravi's central team that he works closely with because he also owns Data and Product responsibilities (on top of leading the central ops team). They belong to the program, data and product teams — Ravi coordinates with them; they are NOT his reports and are NOT performance-tracked like the central team.",
     "data": [
