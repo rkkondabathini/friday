@@ -160,6 +160,7 @@ const buildSystemPrompt = (extraContext = "") => {
 USER PROFILE:
 Name: ${context.user.name}
 Role: ${context.user.designation} at ${context.user.org}
+Scope: ${context.user.scope || ""}
 Timezone: ${context.user.timezone}
 Work hours: ${context.user.work_hours.start} – ${context.user.work_hours.end} IST
 Today: ${now} · ${time} IST
@@ -167,11 +168,22 @@ Today: ${now} · ${time} IST
 LEADERSHIP (report to / escalate to):
 ${context.leadership.map(l => `- ${l.name} (${l.role}): ${l.interaction}`).join("\n")}
 
-TEAM (direct reports / delegates):
-${context.team.map(t => `- ${t.name} (${t.role}): owns ${t.owns.join(", ")}`).join("\n")}
+YOUR TEAM — central ops team for prepaid courses (these are who you performance-track). Mission: ${context.central_team?.mission || ""}
+${Object.entries(context.central_team?.pods || {}).map(([pod, members]) =>
+  `${pod}:\n` + (members || []).map(m => `  - ${m.name}: ${(m.responsibilities || []).join("; ")} (backup: ${m.backup})`).join("\n")
+).join("\n")}
+Judge delivery by the operating model: ${(context.central_team?.operating_model?.shifts || []).join(" | ")}
+
+COLLABORATORS (cross-functional — Ravi also owns Data & Product; NOT his reports, do not performance-track them):
+${Object.entries(context.collaborators || {}).filter(([k]) => k !== "_comment").map(([grp, people]) =>
+  `- ${grp}: ${(people || []).map(p => `${p.name} (${p.role})`).join(", ")}`
+).join("\n")}
 
 PEERS:
-${context.peers.map(p => `- ${p.name} (${p.role})`).join("\n")}
+${(context.peers || []).map(p => `- ${p.name} (${p.role})`).join("\n")}
+
+SYSTEMS THINKING (apply in every analysis — diagnose structure & root cause, not just symptoms):
+${(context.systems_thinking?.principles || []).map(p => `- ${p}`).join("\n")}
 
 CURRENT PRIORITIES:
 ${context.current_priorities.map(p =>
