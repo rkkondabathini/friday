@@ -3,6 +3,7 @@
     "name": "Ravi Kiran",
     "designation": "Senior Manager - Operations",
     "org": "Masai School",
+    "scope": "Leads the central operations team for prepaid courses (two pods, see central_team) AND holds cross-functional responsibility for Data and Product. Because of this he works closely with the program, data and product teams (see collaborators) even though they are not his reports.",
     "timezone": "Asia/Kolkata",
     "work_hours": { "start": "12:00", "end": "21:00" }
   },
@@ -12,22 +13,55 @@
     { "name": "Nischal Shetty", "role": "Director - Curriculum", "interaction": "as needed" },
     { "name": "Naveen M", "role": "Analytics Lead", "interaction": "as needed", "note": "External contract employee; senior to Ravi — treat his asks as coming from a senior." }
   ],
-  "team": [
-    { "name": "Rajesh Patil", "role": "Operations Manager - L3", "owns": ["LMS config", "cohort setup", "batch IDs"] },
-    { "name": "Priyanka G", "role": "Program Manager", "owns": ["cohort migrations", "student transfers"] },
-    { "name": "Kovela N", "role": "Operations Manager - L2", "owns": ["student escalations", "batch transfers", "refunds"] },
-    { "name": "Stephy Varghese", "role": "Data Analyst", "owns": ["audits", "program quality"] },
-    { "name": "Ankitha", "role": "Operations Manager - L1", "owns": ["deviations", "BITSoM programs"] },
-    { "name": "Rahul Kumar", "role": "Operations Manager - L2", "owns": ["mentor payouts", "external mentor–finance coordination", "MOUs"], "note": "Runs the payouts process between external mentors and the internal finance team, coordinating across the internal ops teams." },
-    { "name": "Vivek Swaminathan", "role": "Director - Operations", "owns": ["IITP programs", "program oversight"] },
-    { "name": "Rohit Raj", "role": "Business Analyst", "owns": ["team ops", "audit coordination"] }
-  ],
+  "collaborators": {
+    "_comment": "People OUTSIDE Ravi's central team that he works closely with because he also owns Data and Product responsibilities (on top of leading the central ops team). They belong to the program, data and product teams — Ravi coordinates with them; they are NOT his reports and are NOT performance-tracked like the central team.",
+    "data": [
+      { "name": "Stephy Varghese", "role": "Data Analyst", "why": "Ravi owns Data; works closely on data, audits and program quality." },
+      { "name": "Rohit Raj", "role": "Business Analyst", "why": "Data team; team ops and audit coordination." }
+    ],
+    "product": [
+      { "name": "Sony", "role": "Product", "why": "Ravi owns Product; primary product counterpart." }
+    ],
+    "program": [
+      { "name": "Vivek Swaminathan", "role": "Director - Operations", "why": "Program/ops leadership; IITP programs and program oversight." },
+      { "name": "Priyanka G", "role": "Program Manager", "why": "Program team; cohort migrations, student transfers." },
+      { "name": "Kovela N", "role": "Operations Manager - L2", "why": "Program/ops; student escalations, batch transfers, refunds." },
+      { "name": "Ankitha", "role": "Operations Manager - L1", "why": "Program/ops; deviations, BITSoM programs." }
+    ]
+  },
   "peers": [
     { "name": "Prashant", "role": "Senior Program Manager" },
     { "name": "Akshay Bapat", "role": "EIR - Founder's Office" },
     { "name": "Ritesh Ranjan", "role": "Senior Curriculum Engineer" },
     { "name": "Arushi", "role": "Program Coordinator", "owns": ["NPS communication", "lecture creation"], "note": "External contract employee; treat as a peer." }
   ],
+  "central_team": {
+    "_comment": "Ravi's (RK's) direct central operations team for Masai's prepaid courses. FRIDAY tracks each member's delivery against the responsibilities below. 'RK' as a backup means Ravi himself. This is the authoritative team-for-performance-tracking. Cross-functional contacts Ravi works with (program/data/product) are in 'collaborators', not here.",
+    "mission": "Reposition from reactive ops to predictive 'ATC' ops: don't fix what goes wrong — ensure nothing goes wrong, and be the first to know when it does, not the last. Own outcomes, not activity.",
+    "structure": "Two pods. POD A owns the LMS, cohort integrity and the systems that make everything run. POD B owns the student journey — calendar, sessions, evaluations, outcomes.",
+    "operating_model": {
+      "positioning": "ATC for prepaid courses — full real-time visibility, flag conflicts before they happen.",
+      "shifts": [
+        "Kits: don't wait for a student ticket — track fee dates, vendor timelines and dispatch status; warn the program team before the student notices.",
+        "Payouts: don't ask the program team to fill details — own the number from the central calendar; tell finance this month's payout and project next month's.",
+        "Product: don't ship workarounds — log, classify and push for a permanent tech fix; measure issues permanently eliminated vs patched (patching is not a win).",
+        "Leadership: don't wait to be asked — bring proposals and solutions before they become agenda items.",
+        "Goal: program coordinators think only about student experience; everything else is owned, maintained and improved by this team."
+      ],
+      "accountability": "Pod-level ownership with clear backups; KPIs on outcomes not activity; a data-derived leaderboard for visibility (not competition)."
+    },
+    "pods": {
+      "POD A": [
+        { "name": "Rajesh", "responsibilities": ["Cohort management on LMS", "SoT process doc for cohort management", "Slack workflows (student changes, sections, batch transfers, refunds, lecture edits, auto-reports)", "Complete NPS process", "RBAC management across ops team"], "backup": "Aravind (RK on NPS)" },
+        { "name": "Aravind", "responsibilities": ["Program Master — SoT for all batches, LMS batch info, key resources", "Product concerns — fix through tech, not just process", "Deviations tracking & management", "LMS section management", "Ad hoc structural fixes"], "backup": "Rajesh (RK on ad hoc)" }
+      ],
+      "POD B": [
+        { "name": "Rahul", "responsibilities": ["Zoom account & link management", "Lecture creation", "Payouts — kits, campus immersions, certificates, offline exam, faculty & mentor"], "backup": "Yashas / Raza (RK on Zoom)" },
+        { "name": "Raza", "responsibilities": ["Student kits data & vendor coordination", "Post-batch eligible student data handover to placements", "Provisional scorecards + certificate issuance (soft + hard copy)"], "backup": "Yashas" },
+        { "name": "Yashas", "responsibilities": ["Evaluations — full ownership of online + offline, plagiarism", "Central calendar — SoT for all 70–80 active batches", "Agreement creation & mapping at cohort level (two-pager + long)", "MOU creation & management"], "backup": "Rahul / Raza" }
+      ]
+    }
+  },
   "current_priorities": [
     {
       "initiative": "NPS Rollout",
@@ -42,7 +76,7 @@
   "recurring_meetings": [
     { "name": "Operations Daily Sync-up", "time": "13:00", "days": ["mon","tue","wed","thu","fri"], "attendees": ["PHs", "PLs"] }
   ],
-  "ai_instructions": "You are FRIDAY — Focused Realtime Intelligence for Daily Accountability & Yield. You are Ravi Kiran's Personal Chief of Staff at Masai School. You know his team, his leadership, and his current priorities. Always be concise, direct, and executive-level. Surface insights not raw data. Focus on outcomes. When tasks involve team members, suggest delegation where appropriate. Protect Ravi's focus time. Prioritize ruthlessly: P1 = critical + today, P2 = important + this week, P3 = normal, P4 = low.",
+  "ai_instructions": "You are FRIDAY — Focused Realtime Intelligence for Daily Accountability & Yield. You are Ravi Kiran's Personal Chief of Staff at Masai School. You know his team, his leadership, and his current priorities. Always be concise, direct, and executive-level. Surface insights not raw data. Focus on outcomes. When tasks involve team members, suggest delegation where appropriate. Protect Ravi's focus time. Prioritize ruthlessly: P1 = critical + today, P2 = important + this week, P3 = normal, P4 = low. TEAM PERFORMANCE: track Ravi's central team (see central_team) against their owned responsibilities and the predictive 'ATC' operating model. In briefings, surface who is delivering, what is slipping or at risk, missed handoffs or backup gaps, and where the team is being reactive instead of getting ahead of a problem — judged on outcomes (issues prevented / permanently fixed), not activity.",
   "work_style": "Ravi's real work happens on SLACK and IN-PERSON — that is where decisions, coordination and escalations actually live. Treat Slack mentions, threads and unanswered tags as the PRIMARY, highest-signal input. EMAIL is mainly an official record and EXTERNAL communication channel (partners, formal notices, vendors); treat it as lower-signal unless it is an external escalation, a formal/legal notice, or an official decision that needs his sign-off. When weighting the briefing, standup and action items: lead with Slack, use email only for the official/external items that genuinely matter.",
   "email_labels": {
     "_comment": "Ravi's OWN Gmail status labels (Iron Man themed) and what they mean to FRIDAY. He triages email manually with these, so they are the source of truth. action = on him to act; waiting = he's waiting on someone else; done = resolved, do NOT surface as an open loop; fyi = awareness only. Names are the full Gmail path (parent/child).",
