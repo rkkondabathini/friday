@@ -7,26 +7,26 @@
     "work_hours": { "start": "12:00", "end": "21:00" }
   },
   "leadership": [
-    { "name": "Keshav Misra", "role": "CEO", "interaction": "weekly sync, escalations" },
+    { "name": "Keshav Misra", "role": "Co-Founder & COO", "interaction": "weekly sync, escalations" },
     { "name": "Aman Vats", "role": "Co-founder", "slack_id": "UMJGDN856", "interaction": "as needed (the daily 8 PM t0 update meeting is paused / not currently happening)", "note": "The ONLY Aman who is co-founder. Do NOT confuse with anyone else named Aman (e.g. an 'Aman Sinha') — they are not founders/leadership." },
-    { "name": "Nischal Shetty", "role": "Founder", "interaction": "as needed" }
+    { "name": "Nischal Shetty", "role": "Director - Curriculum", "interaction": "as needed" },
+    { "name": "Naveen M", "role": "Analytics Lead", "interaction": "as needed", "note": "External contract employee; senior to Ravi — treat his asks as coming from a senior." }
   ],
   "team": [
-    { "name": "Rajesh Patil", "role": "Curriculum Ops Lead", "owns": ["LMS config", "cohort setup", "batch IDs"] },
-    { "name": "Priyanka G", "role": "Program Coordinator", "owns": ["cohort migrations", "student transfers"] },
-    { "name": "Kovela N", "role": "Program Coordinator", "owns": ["student escalations", "batch transfers", "refunds"] },
-    { "name": "Stephy Varghese", "role": "Program Coordinator", "owns": ["audits", "program quality"] },
-    { "name": "Ankitha", "role": "Program Coordinator", "owns": ["deviations", "BITSoM programs"] },
-    { "name": "Arushi", "role": "Program Coordinator", "owns": ["NPS communication", "lecture creation"] },
-    { "name": "Rahul Kumar", "role": "Finance & Partnerships Lead", "owns": ["MOUs", "mentor invoices", "payouts"] },
-    { "name": "Vivek Swaminathan", "role": "Program Head", "owns": ["IITP programs", "program oversight"] },
-    { "name": "Rohit Raj", "role": "Operations Lead", "owns": ["team ops", "audit coordination"] }
+    { "name": "Rajesh Patil", "role": "Operations Manager - L3", "owns": ["LMS config", "cohort setup", "batch IDs"] },
+    { "name": "Priyanka G", "role": "Program Manager", "owns": ["cohort migrations", "student transfers"] },
+    { "name": "Kovela N", "role": "Operations Manager - L2", "owns": ["student escalations", "batch transfers", "refunds"] },
+    { "name": "Stephy Varghese", "role": "Data Analyst", "owns": ["audits", "program quality"] },
+    { "name": "Ankitha", "role": "Operations Manager - L1", "owns": ["deviations", "BITSoM programs"] },
+    { "name": "Rahul Kumar", "role": "Operations Manager - L2", "owns": ["mentor payouts", "external mentor–finance coordination", "MOUs"], "note": "Runs the payouts process between external mentors and the internal finance team, coordinating across the internal ops teams." },
+    { "name": "Vivek Swaminathan", "role": "Director - Operations", "owns": ["IITP programs", "program oversight"] },
+    { "name": "Rohit Raj", "role": "Business Analyst", "owns": ["team ops", "audit coordination"] }
   ],
   "peers": [
-    { "name": "Prashant", "role": "Head of Student Success" },
-    { "name": "Naveen M", "role": "Analytics Lead" },
-    { "name": "Akshay Bapat", "role": "Quality Head" },
-    { "name": "Ritesh Ranjan", "role": "Tech Lead" }
+    { "name": "Prashant", "role": "Senior Program Manager" },
+    { "name": "Akshay Bapat", "role": "EIR - Founder's Office" },
+    { "name": "Ritesh Ranjan", "role": "Senior Curriculum Engineer" },
+    { "name": "Arushi", "role": "Program Coordinator", "owns": ["NPS communication", "lecture creation"], "note": "External contract employee; treat as a peer." }
   ],
   "current_priorities": [
     {

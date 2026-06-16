@@ -1,36 +1,49 @@
 /**
  * FRIDAY embeddings — turns text into vectors for semantic memory (RAG).
- * Always uses OpenAI embeddings (Anthropic has no embeddings API), regardless
- * of AI_PROVIDER. Requires OPENAI_API_KEY.
+ * Runs a LOCAL model (all-MiniLM-L6-v2 via transformers.js) entirely
+ * in-process: no API key, no cost, nothing leaves the machine. Weights are
+ * downloaded once (~23MB) to the transformers.js cache and reused thereafter.
+ * Produces 384-dim, L2-normalized vectors.
  */
 
 require("dotenv").config();
 
-const MODEL = process.env.EMBEDDING_MODEL || "text-embedding-3-small";
+const MODEL = process.env.EMBEDDING_MODEL || "Xenova/all-MiniLM-L6-v2";
+const DIM = 384;
 
-let _client = null;
-const client = () => {
-  if (!_client) {
-    const OpenAI = require("openai");
-    _client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// Lazy singleton — load the model once per process. transformers.js is ESM-only,
+// so we reach it via dynamic import from this CommonJS module.
+let _extractorPromise = null;
+const extractor = () => {
+  if (!_extractorPromise) {
+    _extractorPromise = (async () => {
+      const { pipeline, env } = await import("@xenova/transformers");
+      // Don't try to hit a local model dir; use the hub cache only.
+      env.allowLocalModels = false;
+      return pipeline("feature-extraction", MODEL);
+    })();
   }
-  return _client;
+  return _extractorPromise;
 };
 
-// Embed a single string → number[]
+// Embed a single string → number[] (384, normalized)
 const embed = async (text) => {
-  const res = await client().embeddings.create({ model: MODEL, input: text.slice(0, 8000) });
-  return res.data[0].embedding;
+  const ex = await extractor();
+  const out = await ex([(text || " ").slice(0, 8000) || " "], { pooling: "mean", normalize: true });
+  return Array.from(out.data).slice(0, DIM);
 };
 
 // Embed many strings in batches → number[][] (order preserved)
-const embedBatch = async (texts, batchSize = 96) => {
+const embedBatch = async (texts, batchSize = 64) => {
+  const ex = await extractor();
   const out = [];
   for (let i = 0; i < texts.length; i += batchSize) {
-    const chunk = texts.slice(i, i + batchSize).map((t) => (t || "").slice(0, 8000) || " ");
-    const res = await client().embeddings.create({ model: MODEL, input: chunk });
-    // API returns items with .index; sort to be safe
-    res.data.sort((a, b) => a.index - b.index).forEach((d) => out.push(d.embedding));
+    const chunk = texts.slice(i, i + batchSize).map((t) => (t || " ").slice(0, 8000) || " ");
+    const res = await ex(chunk, { pooling: "mean", normalize: true });
+    // res.data is a flat Float32Array of shape [chunk.length, DIM]
+    for (let r = 0; r < chunk.length; r++) {
+      out.push(Array.from(res.data.slice(r * DIM, (r + 1) * DIM)));
+    }
   }
   return out;
 };
@@ -46,4 +59,4 @@ const cosine = (a, b) => {
   return dot / (Math.sqrt(na) * Math.sqrt(nb) || 1);
 };
 
-module.exports = { embed, embedBatch, cosine, MODEL };
+module.exports = { embed, embedBatch, cosine, MODEL, DIM };

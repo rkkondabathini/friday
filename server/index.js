@@ -41,10 +41,23 @@ const emailLabelState = (labels = []) => {
 ai.setUsageSink((u) => { try { db.addUsage(u, todayInTz()); } catch (e) { console.warn("usage track failed:", e.message); } });
 
 // Record a memory locally AND mirror it to the Google Sheet (best-effort)
+// Low-signal types we don't bother embedding into the semantic store.
+const NO_VECTOR = new Set(["task_completed"]);
 const logMemory = (type, content) => {
   db.addMemory(type, content);
   if (db.getConnection("google")) {
     google.appendMemory(type, content).catch(e => console.warn("sheet memory sync failed:", e.message));
+  }
+  // Embed into the semantic store too, so FRIDAY can RECALL what it learns each day
+  // (cheap OpenAI embeddings — off the Claude subscription). Fire-and-forget.
+  if (content && content.trim() && !NO_VECTOR.has(type)) {
+    rag.ingest([{
+      source: type,
+      ext_id: `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      date: new Date().toISOString().split("T")[0],
+      title: null,
+      text: content.trim(),
+    }]).catch(e => console.warn("memory embed failed:", e.message));
   }
 };
 
@@ -498,19 +511,23 @@ const runBriefingJob = async ({ force = false } = {}) => {
     briefing.open_loops = { slack: openLoops.slackOpen, email: openLoops.emailOpen, summary: s };
   }
 
-  // Daily lesson: keep ONE per day stable across regenerations, and remember it so
-  // we never repeat a topic. (Costs no extra Claude calls — it's part of the briefing.)
+  // Daily lessons (TWO per day): keep them stable across regenerations, and remember
+  // the topics so we never repeat. (No extra Claude calls — part of the briefing.)
   const today = todayInTz();
   if (db.getSetting("lesson_day") === today && db.getSetting("lesson_json")) {
-    briefing.learn = JSON.parse(db.getSetting("lesson_json")); // reuse today's lesson
-  } else if (briefing.learn && briefing.learn.title) {
-    db.setSetting("lesson_day", today);
-    db.setSetting("lesson_json", JSON.stringify(briefing.learn));
-    db.setSetting("learned_topics", JSON.stringify([...learnedTopics, briefing.learn.title].slice(-40)));
-    // Store the FULL lesson (not just the title) so it's durable in memory + the
-    // Google sheet, independent of briefing retention.
-    const L = briefing.learn;
-    logMemory("lesson", `${L.title} [${L.category || "-"}] — ${L.lesson || ""}${L.example ? ` · Example: ${L.example}` : ""}${L.try_this ? ` · Try: ${L.try_this}` : ""}`);
+    briefing.learn = JSON.parse(db.getSetting("lesson_json")); // reuse today's lessons
+  } else {
+    const lessons = Array.isArray(briefing.learn) ? briefing.learn : (briefing.learn?.title ? [briefing.learn] : []);
+    if (lessons.length) {
+      briefing.learn = lessons;
+      db.setSetting("lesson_day", today);
+      db.setSetting("lesson_json", JSON.stringify(lessons));
+      db.setSetting("learned_topics", JSON.stringify([...learnedTopics, ...lessons.map(l => l.title)].slice(-40)));
+      // Store each full lesson so it's durable in memory + the Google sheet.
+      for (const L of lessons) {
+        logMemory("lesson", `${L.title} [${L.category || "-"}] — ${L.lesson || ""}${L.example ? ` · Example: ${L.example}` : ""}${L.try_this ? ` · Try: ${L.try_this}` : ""}`);
+      }
+    }
   }
 
   db.saveBriefing(date, briefing, "sync");
@@ -566,7 +583,7 @@ app.get("/api/status", (req, res) => res.json(queue.status()));
 // Today's real Claude usage — tokens, cost, calls, auto-gen count + the daily cap.
 app.get("/api/usage", (req, res) => {
   const u = db.getUsage(todayInTz());
-  const cap = (process.env.AUTO_TIMES || "12:00,16:00,20:00").split(",").filter(Boolean).length;
+  const cap = (process.env.AUTO_TIMES || "10:00,11:00,12:00,13:00,14:00,15:00,16:00,17:00,18:00,19:00,20:00,21:00").split(",").filter(Boolean).length;
   res.json({ ...u, autoCap: cap });
 });
 
@@ -632,8 +649,10 @@ app.get("/api/outbox/:id", (req, res) => {
 // FRIDAY sips your Claude subscription — leaving you headroom for everything else.
 // At each slot it only spends a Claude call if inputs actually changed. Manual
 // "sync" in the UI always works and bypasses this schedule. ──
-const AUTO_REFRESH_MIN = Number(process.env.AUTO_REFRESH_MINUTES || 20); // how often to CHECK the clock
-const AUTO_TIMES = (process.env.AUTO_TIMES || "12:00,16:00,20:00")
+const AUTO_REFRESH_MIN = Number(process.env.AUTO_REFRESH_MINUTES || 15); // how often to CHECK the clock
+// Hourly across work hours — cheap now that briefings run on Sonnet with a slim
+// prompt, and each slot only spends a Claude call if inputs actually changed.
+const AUTO_TIMES = (process.env.AUTO_TIMES || "10:00,11:00,12:00,13:00,14:00,15:00,16:00,17:00,18:00,19:00,20:00,21:00")
   .split(",").map(s => s.trim()).filter(Boolean).sort();
 
 const nowHHMM = () => new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: USER_TZ });

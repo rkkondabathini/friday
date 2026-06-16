@@ -79,7 +79,9 @@ const getClaudeCliResponse = (messages, systemPrompt) =>
     // --strict-mcp-config skips loading all MCP connectors (huge startup saving).
     // --output-format json so we get back exact token usage + cost for tracking.
     const args = ["-p", "--output-format", "json", "--strict-mcp-config"];
-    if (process.env.CLAUDE_CLI_MODEL) args.push("--model", process.env.CLAUDE_CLI_MODEL);
+    // Sonnet by default — plenty sharp for triage/prioritisation, far lighter on the
+    // subscription than Opus. Override with CLAUDE_CLI_MODEL if ever needed.
+    args.push("--model", process.env.CLAUDE_CLI_MODEL || "sonnet");
 
     // Use the Claude SUBSCRIPTION login, not an API key. Any ANTHROPIC_API_KEY in
     // env would force Claude into API mode (and ours is a placeholder) — strip it.
@@ -248,44 +250,27 @@ CHANNEL WEIGHTING (important): His real work happens on SLACK and IN-PERSON. Tre
 
 ${directives.length ? `== STANDING PRIORITIES (weight heavily across the whole briefing) ==\n${directives.map((d, i) => `${i + 1}. ${d}`).join("\n")}\n` : ""}
 == INPUT DATA ==
-GMAIL (received + sent). [TO-ME] = he is in the To line (a real ask — may need his reply); [cc/fyi] = he is only Cc'd (FYI/awareness, NOT a reply obligation — IGNORE unless it is a clear escalation, a leadership/founder ask, or money/student at risk). {curly braces} = his OWN Gmail triage labels — trust them: a "Base Secured" (done) label means resolved (do NOT surface it), an action label (e.g. Rapid Response, Action Pending, Revert Pending, followup, Closure Pending, Tactical Check) means HE flagged it to act on (treat as a real action), "Command Await" = waiting on someone else, "Spectate" = FYI only:
+GMAIL (received + sent). [TO-ME] = he is in the To line (a real ask — may need his reply); [cc/fyi] = he is only Cc'd (FYI/awareness, NOT a reply obligation — IGNORE unless it is a clear escalation, a leadership/founder ask, or money/student at risk). {curly braces} = his OWN Gmail triage labels — trust them: a "Base Secured" (done) label means resolved (do NOT surface it), an action label means HE flagged it to act on, "Command Await" = waiting on someone else, "Spectate" = FYI only:
 ${compactGmail(gmailData)}
-CALENDAR (today's events):
-${compactCalendar(calendarData)}
 SLACK (messages where he was tagged/asked — may await his reply):
 ${compactSlack(slackData)}
-OPEN LOOPS (auto-detected — tagged/emailed and he has NOT replied yet; these are the highest-signal "still on him" items):
+OPEN LOOPS (auto-detected — tagged/emailed and he has NOT replied yet; the highest-signal "still on him" items):
 ${compactOpenLoops(openLoops)}
-CARRY-FORWARD (incomplete tasks from yesterday):
-${compactTasks(carryForwardTasks)}
 
 == HOW TO BUILD EACH SECTION (follow precisely) ==
-1. briefing.critical_updates — 3 to 5 items that genuinely need his attention today, drawn PRIMARILY from Slack and Gmail signals (his real channels) plus the standing priorities. Each: a specific title and a detail of 1-2 full sentences with the real context (who, which program/batch, why it matters, what's at stake). source = "slack" | "gmail" | "calendar" | "manual" (where it came from). ref (REQUIRED, do not omit) = the bracket tag printed at the very start of the source line this item is based on. Every GMAIL and SLACK line below is prefixed with its tag like "[g3]" or "[s2]" — copy that tag's inner value VERBATIM into ref (e.g. ref:"g3"). Set ref:"" ONLY when the item comes from a calendar event, a manual note, or a standing priority (nothing to link). This builds the deep-link to the original message; an item with source gmail/slack and an empty ref is a bug. priority = "P1" (must act today — blocking someone, a deadline, a leadership/founder ask, money or a student at risk) | "P2" (important, act soon) | "P3" (worth knowing, not urgent). urgency = "high" | "medium" | "low" (mirror the priority). RANK these so the most important is first.
-2. briefing.decisions_needed — decisions only HE can make. Give title, context (the tradeoff / why it's stuck), and "from" (who's asking).
-3. briefing.stakeholder_followups — people waiting on him: person, channel, waiting_since, topic. Build this PRIMARILY from the OPEN LOOPS list (those are confirmed unanswered). Lead with the Slack open loops; include only the emails that genuinely need a personal reply. Drop anything that's just an FYI/notification.
-4. standup.leadership — what he reports UP to Keshav/Aman. yesterday = concrete things shipped; today = what he is personally driving; blockers = what's stuck + who he needs. 3 specific bullets each (not one-liners).
-5. standup.team — yesterday = what his team delivered; today = what they're working on; delegate = specific things to hand to NAMED teammates (e.g., "Rajesh: assign LMS Batch IDs for the 12 cohorts").
-6. action_items — 6 to 9 concrete, actionable tasks from the data, carry-forward and priorities. Each: id (short slug), task (specific), owner ("Me" or a named teammate), due, status ("Not Started"), priority (P1 = critical+today, P2 = important this week, P3 = normal, P4 = low), priority_reason (one line WHY), source ("gmail"|"slack"|"calendar"|"manual"), type ("action"|"decision"|"delegate"|"followup"|"people").
-7. schedule — DESIGN HIS FULL DAY from ${wh.start} to ${wh.end} IST. THIS IS THE CENTREPIECE:
-   - Anchor every real calendar meeting at its actual time.
-   - Anchor his recurring meetings:\n${recurring}
-   - Time-block the action_items into the gaps: P1 deep-work in the early afternoon, calls & follow-ups mid-afternoon, dedicated email/Slack processing blocks, a short buffer.
-   - Open with a planning block at ${wh.start} and close with an EOD wrap-up + next-day prep near ${wh.end}.
-   - Cover the WHOLE window with NO large empty gaps. Each block: time ("HH:MM" 24h), block (specific title tied to a real meeting or task), type ("deep_work"|"meeting"|"followup"|"comms"|"buffer"|"strategic"), notes (what to actually do).
-8. summary — focus_of_day (one punchy sentence naming the single most important outcome today), top3 (the three things that MUST happen), risk_flag (biggest risk today, or "").
-9. learn — teach him ONE genuinely useful, NEW, often-under-the-radar thing that helps a senior operations leader (~10 yrs experience) grow professionally AND personally. ROTATE widely across domains day to day — do NOT default to spreadsheets every time. category = "sheets" | "product" | "management" | "finance" | "strategy" | "communication" | "automation" | "growth". Pick rare-but-high-leverage over basics. lesson = 1-2 sentences on what it is and why it matters. example = a tiny concrete example tied to HIS ops/leadership world (a formula, a framework applied to a real situation, a number). try_this = one specific thing to try today. DO NOT repeat any of these already-taught topics: ${learnedTopics.length ? learnedTopics.join("; ") : "(none yet)"}.
+1. briefing.critical_updates — 3 to 5 items that genuinely need his attention today, drawn PRIMARILY from Slack and Gmail plus the standing priorities. Each: a specific title and a detail of 1-2 full sentences with the real context (who, which program/batch, why it matters, what's at stake). source = "slack" | "gmail" | "manual". ref (REQUIRED, do not omit) = the bracket tag at the very start of the source line this item is based on — every GMAIL and SLACK line is prefixed like "[g3]" or "[s2]"; copy that inner value VERBATIM into ref (e.g. ref:"g3"). Set ref:"" only for a manual note or a standing priority. priority = "P1" (must act today — blocking someone, a deadline, a leadership/founder ask, money or a student at risk) | "P2" (important, act soon) | "P3" (worth knowing). urgency = "high" | "medium" | "low" (mirror priority). RANK most important first.
+2. briefing.stakeholder_followups — people waiting on him: person, channel, waiting_since, topic. Build PRIMARILY from the OPEN LOOPS list (confirmed unanswered). Lead with Slack; include only emails that genuinely need a personal reply. Drop FYI/notifications. slack_url = the message link if the source line has one.
+3. summary — focus_of_day (one punchy sentence naming the single most important outcome today) and risk_flag (the biggest QUIET risk today — the thing easy to miss — or "").
+4. learn — TWO short, genuinely useful, NEW lessons to help a senior operations leader (~10 yrs experience) grow professionally AND personally. The two must cover DIFFERENT domains (don't give two of the same). Each: title, category ("sheets"|"product"|"management"|"finance"|"strategy"|"communication"|"automation"|"growth"), lesson (1-2 sentences: what it is + why it matters), example (a tiny concrete example tied to HIS ops/leadership world), try_this (one specific thing to try today). Prefer rare-but-high-leverage over basics. DO NOT repeat any already-taught topic: ${learnedTopics.length ? learnedTopics.join("; ") : "(none yet)"}.
 
 Return ONLY valid JSON, no markdown fences, exactly this shape:
 {
-  "briefing": { "critical_updates": [{"id":"cu-1","title":"…","detail":"…","source":"gmail","priority":"P1","urgency":"high","ref":"g3"}], "decisions_needed": [{"title","context","from"}], "stakeholder_followups": [{"person","channel","waiting_since","topic","slack_url"}] },
-  "standup": { "leadership": {"yesterday":[],"today":[],"blockers":[]}, "team": {"yesterday":[],"today":[],"delegate":[]} },
-  "action_items": [{"id","task","owner","due","status","priority","priority_reason","source","type"}],
-  "schedule": [{"time","block","type","notes"}],
-  "summary": {"focus_of_day","top3":[],"risk_flag"},
-  "learn": {"title","category","lesson","example","try_this"}
+  "briefing": { "critical_updates": [{"id":"cu-1","title":"…","detail":"…","source":"gmail","priority":"P1","urgency":"high","ref":"g3"}], "stakeholder_followups": [{"person","channel","waiting_since","topic","slack_url"}] },
+  "summary": {"focus_of_day","risk_flag"},
+  "learn": [{"title","category","lesson","example","try_this"},{"title","category","lesson","example","try_this"}]
 }`;
 
-  const raw = await chat([{ role: "user", content: prompt }], "", 6000);
+  const raw = await chat([{ role: "user", content: prompt }], "", 3200);
   const clean = raw.replace(/```json|```/g, "").trim();
   // Be robust to any preamble/postamble: parse the outermost JSON object
   const start = clean.indexOf("{");

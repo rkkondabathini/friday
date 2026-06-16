@@ -14,6 +14,7 @@ const palettes = {
     blue:"#9aa0a8",  blueD:"#9aa0a812",
     amber:"#c4c9cf", amberD:"#c4c9cf12",
     red:"#f0616d",   redD:"#f0616d20",
+    ok:"#3fcf87",
     purple:"#9aa0a8",purpleD:"#9aa0a812",
     cyan:"#9aa0a8",  cyanD:"#9aa0a812",
     slack:"#a594c9", slackD:"#a594c918",
@@ -27,6 +28,7 @@ const palettes = {
     blue:"#585d64",  blueD:"#585d640a",
     amber:"#3a3d42", amberD:"#3a3d420a",
     red:"#d63a4a",   redD:"#d63a4a14",
+    ok:"#1a9e5f",
     purple:"#585d64",purpleD:"#585d640a",
     cyan:"#585d64",  cyanD:"#585d640a",
     slack:"#8338b8", slackD:"#8338b814",
@@ -297,6 +299,7 @@ export default function App() {
   const [loopsBusy,setLoopsBusy]= useState(false);
   const [newLoop,  setNewLoop]  = useState("");
   const [expanded, setExpanded] = useState({});
+  const [copied,   setCopied]   = useState(null);   // which prepared draft was just copied
   const [learnOpen, setLearnOpen] = useState(false);
   const [learnRead, setLearnRead] = useState(() => { try { return localStorage.getItem("friday_learn_read"); } catch { return null; } });
   const [rightTab, setRightTab] = useState("loops");   // which right-panel section is shown
@@ -328,6 +331,13 @@ export default function App() {
   const SH  = { display:"flex", alignItems:"baseline", gap:10, marginBottom:16, paddingBottom:11, borderBottom:`1px solid ${T.border}` };
   const SHk = { fontSize:11, fontWeight:700, color:T.bright, letterSpacing:".15em", textTransform:"uppercase", ...MONO };
   const SHc = { fontSize:11, color:T.dim, ...MONO };
+
+  // Copy a prepared draft to the clipboard (the "approve" step is the user sending it).
+  const copyDraft = (key, text) => {
+    try { navigator.clipboard?.writeText(text); } catch {}
+    setCopied(key);
+    setTimeout(() => setCopied(c => (c === key ? null : c)), 1600);
+  };
 
   useEffect(() => { init(); }, []);
 
@@ -404,7 +414,8 @@ export default function App() {
   };
   const openLearn = () => {
     setLearnOpen(o => !o);
-    const t = data?.learn?.title;
+    const arr = Array.isArray(data?.learn) ? data.learn : (data?.learn?.title ? [data.learn] : []);
+    const t = arr.map(l => l.title).join("|");
     if (t) { try { localStorage.setItem("friday_learn_read", t); } catch {} setLearnRead(t); }
   };
 
@@ -651,6 +662,8 @@ export default function App() {
   );
 
   const { briefing, standup, schedule, summary, learn } = data || {};
+  const lessons = Array.isArray(learn) ? learn : (learn && learn.title ? [learn] : []);
+  const lessonsKey = lessons.map(l => l.title).join("|");
   const taskList = allTasks();
   const rawTasks = data?.action_items || [];
   const p1    = rawTasks.map(t => ({ ...t, status: ov[t.id] || t.status })).filter(t => t.priority === "P1" && t.status !== "Completed").length;
@@ -772,107 +785,106 @@ export default function App() {
   const renderLoops = () => {
     const exp = !!showAll.loops;
     const sl = exp ? slackOpen : slackOpen.slice(0, 6);
-    const em = exp ? emailOpen : emailOpen.slice(0, 4);
-    const moreThanCap = slackOpen.length > 6 || emailOpen.length > 4 || (loops?.summary?.emailShown < eOpen);
+    const em = exp ? emailOpen : emailOpen.slice(0, 6);
+    const moreThanCap = slackOpen.length > 6 || emailOpen.length > 6;
+    const colHead = (icon, label, count, color, extra) => (
+      <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:11 }}>
+        <i className={`ti ${icon}`} style={{ fontSize:13, color }} />
+        <span style={{ fontSize:10.5, fontWeight:700, color, letterSpacing:".12em", ...MONO }}>{label}</span>
+        <span style={{ fontSize:10.5, color:T.dim, ...MONO }}>{count}</span>
+        {extra}
+      </div>
+    );
     return (
       <>
-        <div style={{ display:"flex", gap:6, marginBottom:12 }}>
+        <div style={{ display:"flex", gap:8, marginBottom:16 }}>
           <input value={newLoop} onChange={e => setNewLoop(e.target.value)}
             onKeyDown={e => e.key === "Enter" && addLoop()}
             placeholder="jot something on you — Program Master update, call vendor…" style={{ flex:1 }} />
-          <button onClick={addLoop} style={{ padding:"9px 15px", background:T.green, border:"none", borderRadius:8, color:T.bg, fontWeight:600, fontSize:12.5, ...M }}>add</button>
+          <button onClick={addLoop} style={{ padding:"9px 16px", background:T.bright, border:"none", borderRadius:8, color:T.bg, fontWeight:600, fontSize:12.5, ...M }}>add</button>
         </div>
         {loops?.errors?.google && (
           <div onClick={() => doConnect("google")} title="Reconnect Google"
             style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer", fontSize:12,
-              color:T.amber, background:T.amberD, border:`1px solid ${T.amber}44`, borderRadius:8, padding:"8px 11px", marginBottom:12, ...M }}>
+              color:T.red, background:T.redD, border:`1px solid ${T.red}44`, borderRadius:8, padding:"9px 12px", marginBottom:14, ...M }}>
             <i className="ti ti-mail-off" style={{ fontSize:14, flexShrink:0 }} />
             <span style={{ flex:1 }}>Google sign-in expired — email loops paused. <b style={{ fontWeight:600, textDecoration:"underline" }}>Reconnect</b></span>
           </div>
         )}
         {!loops ? <Note>detecting open loops…</Note> : (sOpen + eOpen + mOpen === 0 && !loops?.errors?.google) ? (
-          <div style={{ textAlign:"center", padding:"30px 0", color:T.dim }}>
-            <i className="ti ti-circle-check" style={{ fontSize:28, color:T.green, marginBottom:8, display:"block" }} />
-            <div style={{ fontSize:13.5, color:T.green }}>All caught up</div>
+          <div style={{ textAlign:"center", padding:"34px 0", color:T.dim }}>
+            <i className="ti ti-circle-check" style={{ fontSize:28, color:T.ok, marginBottom:8, display:"block" }} />
+            <div style={{ fontSize:13.5, color:T.ok }}>All caught up</div>
             <div style={{ fontSize:12, color:T.dim, marginTop:3 }}>nothing's waiting on a reply from you</div>
           </div>
         ) : (
           <>
+            {/* Captured — full width */}
             {manualOpen.length > 0 && (
-              <div style={{ marginBottom:14 }}>
-                <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:8 }}>
-                  <i className="ti ti-pin" style={{ fontSize:13, color:T.purple }} />
-                  <span style={{ fontSize:11, fontWeight:700, color:T.purple, letterSpacing:".07em", ...MONO }}>CAPTURED</span>
-                  <span style={{ fontSize:10.5, color:T.dim, ...MONO }}>{mOpen}</span>
-                </div>
-                {manualOpen.map(m => (
-                  <div key={m.id} style={{ display:"flex", gap:9, alignItems:"center", background:T.bg,
-                    border:`1px solid ${T.border}`, borderLeft:`2px solid ${T.purple}`, borderRadius:8, padding:"9px 12px", marginBottom:5 }}>
-                    <button onClick={() => doneLoop(m.id)} title="Mark done"
-                      style={{ width:17, height:17, borderRadius:5, border:`1.5px solid ${T.borderB}`, background:"transparent",
-                        display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, color:T.green, fontSize:10 }}>✓</button>
-                    <span style={{ flex:1, fontSize:12.5, color:T.text, lineHeight:1.45 }}>{m.text}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            {slackOpen.length > 0 && (
-              <div style={{ marginBottom:em.length||eOpen ? 14 : 0 }}>
-                <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:8 }}>
-                  <i className="ti ti-brand-slack" style={{ fontSize:13, color:T.slack }} />
-                  <span style={{ fontSize:11, fontWeight:700, color:T.slack, letterSpacing:".07em", ...MONO }}>SLACK</span>
-                  <span style={{ fontSize:10.5, color:T.dim, ...MONO }}>{sOpen}</span>
-                </div>
-                {sl.map((m, i) => (
-                  <a key={m.id || i} href={m.slack_url} target="_blank" rel="noopener noreferrer" style={{ display:"block", textDecoration:"none" }}>
-                    <div className="hovcard" style={{ background:T.bg, border:`1px solid ${T.border}`, borderLeft:`2px solid ${T.slack}`, borderRadius:8, padding:"9px 12px", marginBottom:5 }}>
-                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, marginBottom:3 }}>
-                        <span style={{ fontSize:11.5, color:T.slack, fontWeight:600 }}>#{m.channel}</span>
-                        <span style={{ fontSize:10, color:m.ageHours>=24?T.red:T.dim, ...MONO }}>{m.ageHours>=24 ? `${Math.floor(m.ageHours/24)}d` : `${m.ageHours}h`}</span>
-                      </div>
-                      <div style={{ fontSize:12.5, color:T.text, lineHeight:1.5 }}>
-                        <span style={{ color:T.muted }}>@{m.user}: </span>
-                        {(m.text || "").replace(/<@[A-Z0-9]+\|([^>]+)>/g, "@$1").replace(/\s+/g," ").slice(0, 130)}
-                      </div>
+              <div style={{ marginBottom:20 }}>
+                {colHead("ti-pin", "CAPTURED", mOpen, T.muted)}
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(280px, 1fr))", gap:"8px 14px" }}>
+                  {manualOpen.map(m => (
+                    <div key={m.id} className="hovcard" style={{ display:"flex", gap:10, alignItems:"center", background:T.card,
+                      border:`1px solid ${T.border}`, borderLeft:`3px solid ${T.borderB}`, borderRadius:10, padding:"10px 12px" }}>
+                      <button onClick={() => doneLoop(m.id)} title="Mark done"
+                        style={{ width:18, height:18, borderRadius:6, border:`1.5px solid ${T.borderB}`, background:"transparent",
+                          display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, color:T.ok, fontSize:11 }}>✓</button>
+                      <span style={{ flex:1, fontSize:12.5, color:T.text, lineHeight:1.45 }}>{m.text}</span>
                     </div>
-                  </a>
-                ))}
-              </div>
-            )}
-            {emailOpen.length > 0 && (
-              <div>
-                <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:8 }}>
-                  <i className="ti ti-mail" style={{ fontSize:13, color:T.gmail }} />
-                  <span style={{ fontSize:11, fontWeight:700, color:T.gmail, letterSpacing:".07em", ...MONO }}>EMAIL · TO YOU</span>
-                  <span style={{ fontSize:10.5, color:T.dim, ...MONO }}>{eOpen}{loops?.summary?.emailUnread ? ` · ${loops.summary.emailUnread} unread` : ""}</span>
-                  {loops?.summary?.emailCcFyi > 0 && (
-                    <span title="You're only Cc'd on these — FYI, not on you to reply" style={{ marginLeft:"auto", fontSize:10, color:T.dim, ...MONO }}>
-                      {loops.summary.emailCcFyi} cc'd · FYI, set aside
-                    </span>
-                  )}
+                  ))}
                 </div>
-                {em.map((t, i) => (
-                  <a key={t.id || i} href={t.gmail_url || undefined} target={t.gmail_url ? "_blank" : undefined} rel="noopener noreferrer"
-                    title={t.gmail_url ? "open in Gmail" : undefined}
-                    style={{ display:"block", textDecoration:"none", cursor:t.gmail_url ? "pointer" : "default" }}>
-                    <div style={{ background:T.bg, border:`1px solid ${T.border}`, borderLeft:`2px solid ${T.gmail}`, borderRadius:8, padding:"9px 12px", marginBottom:5, opacity:t.unread?1:0.65 }}>
-                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, marginBottom:2 }}>
-                        <span style={{ fontSize:12.5, color:T.bright, fontWeight:t.unread?600:500 }}>
-                          {t.unread && <span style={{ color:T.gmail, marginRight:5 }}>●</span>}
-                          {(t.from || "").replace(/<.*>/, "").replace(/"/g,"").trim().slice(0, 30)}
-                        </span>
-                        {t.gmail_url && <i className="ti ti-arrow-up-right" style={{ fontSize:12, color:T.dim }} />}
-                      </div>
-                      <div style={{ fontSize:12, color:T.text, lineHeight:1.45 }}>{(t.subject || "(no subject)").slice(0, 80)}</div>
-                    </div>
-                  </a>
-                ))}
               </div>
             )}
+
+            {/* Slack | Email — two columns */}
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(300px, 1fr))", gap:"6px 34px", alignItems:"start" }}>
+              {slackOpen.length > 0 && (
+                <div style={{ minWidth:0 }}>
+                  {colHead("ti-brand-slack", "SLACK", sOpen, T.slack)}
+                  {sl.map((m, i) => (
+                    <a key={m.id || i} href={m.slack_url} target="_blank" rel="noopener noreferrer" style={{ display:"block", textDecoration:"none" }}>
+                      <div className="hovcard" style={{ background:T.card, border:`1px solid ${T.border}`, borderLeft:`3px solid ${T.slack}`, borderRadius:10, padding:"10px 13px", marginBottom:7 }}>
+                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, marginBottom:3 }}>
+                          <span style={{ fontSize:11.5, color:T.slack, fontWeight:600 }}>#{m.channel}</span>
+                          <span style={{ fontSize:10, fontWeight:m.ageHours>=24?700:400, color:m.ageHours>=24?T.red:T.dim, ...MONO }}>{m.ageHours>=24 ? `${Math.floor(m.ageHours/24)}d` : `${m.ageHours}h`}</span>
+                        </div>
+                        <div style={{ fontSize:12.5, color:T.text, lineHeight:1.5 }}>
+                          <span style={{ color:T.muted }}>@{m.user}: </span>
+                          {(m.text || "").replace(/<@[A-Z0-9]+\|([^>]+)>/g, "@$1").replace(/\s+/g," ").slice(0, 130)}
+                        </div>
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              )}
+              {emailOpen.length > 0 && (
+                <div style={{ minWidth:0 }}>
+                  {colHead("ti-mail", "EMAIL · TO YOU", `${eOpen}${loops?.summary?.emailUnread ? ` · ${loops.summary.emailUnread} unread` : ""}`, T.gmail,
+                    loops?.summary?.emailCcFyi > 0 ? <span title="You're only Cc'd on these — FYI" style={{ marginLeft:"auto", fontSize:10, color:T.dim, ...MONO }}>{loops.summary.emailCcFyi} cc'd · set aside</span> : null)}
+                  {em.map((t, i) => (
+                    <a key={t.id || i} href={t.gmail_url || undefined} target={t.gmail_url ? "_blank" : undefined} rel="noopener noreferrer"
+                      title={t.gmail_url ? "open in Gmail" : undefined}
+                      style={{ display:"block", textDecoration:"none", cursor:t.gmail_url ? "pointer" : "default" }}>
+                      <div className="hovcard" style={{ background:T.card, border:`1px solid ${T.border}`, borderLeft:`3px solid ${T.gmail}`, borderRadius:10, padding:"10px 13px", marginBottom:7, opacity:t.unread?1:0.7 }}>
+                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, marginBottom:2 }}>
+                          <span style={{ fontSize:12.5, color:T.bright, fontWeight:t.unread?600:500 }}>
+                            {t.unread && <span style={{ color:T.gmail, marginRight:5 }}>●</span>}
+                            {(t.from || "").replace(/<.*>/, "").replace(/"/g,"").trim().slice(0, 30)}
+                          </span>
+                          {t.gmail_url && <i className="ti ti-arrow-up-right" style={{ fontSize:12, color:T.dim }} />}
+                        </div>
+                        <div style={{ fontSize:12, color:T.text, lineHeight:1.45 }}>{(t.subject || "(no subject)").slice(0, 80)}</div>
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
             {moreThanCap && (
               <button onClick={() => setShowAll(s => ({ ...s, loops: !s.loops }))}
                 style={{ fontSize:11.5, color:T.muted, background:"transparent", border:`1px solid ${T.border}`,
-                  borderRadius:8, padding:"6px 11px", marginTop:8, display:"inline-flex", alignItems:"center", gap:5, ...M }}>
+                  borderRadius:8, padding:"7px 13px", marginTop:12, display:"inline-flex", alignItems:"center", gap:5, ...M }}>
                 <i className={`ti ti-chevron-${exp?"up":"down"}`} style={{ fontSize:13 }} />
                 {exp ? "show less" : `show all (${sOpen + eOpen})`}
               </button>
@@ -937,41 +949,48 @@ export default function App() {
       <style>{makeCss(T)}</style>
 
       {/* Floating Learn-today — out of the way; glance only if you want to */}
-      {learn && learn.title && (
+      {lessons.length > 0 && (
         <div style={{ position:"fixed", bottom:20, left:20, zIndex:300 }}>
           {learnOpen && (
-            <div className="fadeIn" style={{ position:"absolute", bottom:64, left:0, width:360,
-              background:T.panel, border:`1px solid ${T.purple}55`, borderRadius:12, overflow:"hidden",
-              boxShadow:`0 24px 48px rgba(0,0,0,.7)` }}>
+            <div className="fadeIn" style={{ position:"absolute", bottom:64, left:0, width:380,
+              background:T.panel, border:`1px solid ${T.borderB}`, borderRadius:14, overflow:"hidden",
+              boxShadow:`0 24px 48px rgba(0,0,0,.35)` }}>
               <div style={{ padding:"12px 15px", borderBottom:`1px solid ${T.border}`, display:"flex", alignItems:"center", gap:8 }}>
-                <i className="ti ti-bulb" style={{ fontSize:15, color:T.purple }} />
-                <span style={{ fontSize:11.5, fontWeight:700, color:T.purple, letterSpacing:".1em", flex:1, ...MONO }}>LEARN TODAY</span>
-                {learn.category && <Tag color={T.cyan}>{learn.category}</Tag>}
+                <i className="ti ti-bulb" style={{ fontSize:15, color:T.bright }} />
+                <span style={{ fontSize:11, fontWeight:700, color:T.muted, letterSpacing:".14em", flex:1, ...MONO }}>LEARN TODAY · {lessons.length}</span>
                 <button onClick={() => setLearnOpen(false)} style={{ background:"transparent", border:"none", color:T.dim, fontSize:14 }}><i className="ti ti-x" /></button>
               </div>
-              <div style={{ padding:"13px 15px", maxHeight:380, overflowY:"auto" }}>
-                <div style={{ fontSize:14.5, fontWeight:600, color:T.bright, marginBottom:7, lineHeight:1.3 }}>{learn.title}</div>
-                <div style={{ fontSize:13, color:T.text, lineHeight:1.65, marginBottom:learn.example?9:0 }}>{learn.lesson}</div>
-                {learn.example && (
-                  <div style={{ fontSize:12, color:T.cyan, background:T.bg, border:`1px solid ${T.border}`,
-                    borderRadius:8, padding:"9px 11px", margin:"0 0 9px", whiteSpace:"pre-wrap", lineHeight:1.5, ...MONO }}>{learn.example}</div>
-                )}
-                {learn.try_this && (
-                  <div style={{ fontSize:12.5, color:T.muted, lineHeight:1.6 }}>
-                    <span style={{ color:T.green, fontWeight:700 }}>try today → </span>{learn.try_this}
+              <div style={{ maxHeight:460, overflowY:"auto" }}>
+                {lessons.map((L, i) => (
+                  <div key={i} style={{ padding:"13px 15px", borderBottom: i < lessons.length-1 ? `1px solid ${T.border}` : "none" }}>
+                    <div style={{ display:"flex", alignItems:"baseline", gap:8, marginBottom:6 }}>
+                      <span style={{ fontSize:10, fontWeight:700, color:T.dim, ...MONO }}>{String(i+1).padStart(2,"0")}</span>
+                      <div style={{ fontSize:14, fontWeight:600, color:T.bright, lineHeight:1.3, flex:1 }}>{L.title}</div>
+                      {L.category && <span style={{ fontSize:9.5, fontWeight:600, color:T.muted, background:T.cardHi, border:`1px solid ${T.border}`, borderRadius:5, padding:"2px 6px", ...MONO }}>{L.category}</span>}
+                    </div>
+                    <div style={{ fontSize:12.5, color:T.text, lineHeight:1.6, marginBottom:L.example?8:0 }}>{L.lesson}</div>
+                    {L.example && (
+                      <div style={{ fontSize:11.5, color:T.text, background:T.cardHi, border:`1px solid ${T.border}`,
+                        borderRadius:8, padding:"8px 10px", margin:"0 0 8px", whiteSpace:"pre-wrap", lineHeight:1.5, ...MONO }}>{L.example}</div>
+                    )}
+                    {L.try_this && (
+                      <div style={{ fontSize:12, color:T.muted, lineHeight:1.55 }}>
+                        <span style={{ color:T.ok, fontWeight:700 }}>try today → </span>{L.try_this}
+                      </div>
+                    )}
                   </div>
-                )}
+                ))}
               </div>
             </div>
           )}
           <button onClick={openLearn} title="Learn something new today"
             style={{ width:48, height:48, borderRadius:"50%", background:learnOpen?T.card:T.panel,
-              border:`1px solid ${learnOpen?T.purple:T.border}`, color:T.purple, position:"relative",
-              display:"flex", alignItems:"center", justifyContent:"center", boxShadow:"0 4px 18px rgba(0,0,0,.45)" }}>
+              border:`1px solid ${learnOpen?T.bright:T.borderB}`, color:T.bright, position:"relative",
+              display:"flex", alignItems:"center", justifyContent:"center", boxShadow:"0 4px 18px rgba(0,0,0,.22)" }}>
             <i className={`ti ${learnOpen?"ti-x":"ti-bulb"}`} style={{ fontSize:20 }} />
-            {!learnOpen && learnRead !== learn.title && (
+            {!learnOpen && learnRead !== lessonsKey && (
               <span style={{ position:"absolute", top:9, right:9, width:9, height:9, borderRadius:"50%",
-                background:T.purple, border:`2px solid ${T.panel}`, boxShadow:`0 0 8px ${T.purple}` }} />
+                background:T.ok, border:`2px solid ${T.panel}`, boxShadow:`0 0 8px ${T.ok}` }} />
             )}
           </button>
         </div>
@@ -1072,13 +1091,9 @@ export default function App() {
       {/* Masthead */}
       <header style={{ display:"flex", alignItems:"center", gap:13, flexWrap:"wrap",
         paddingBottom:15, borderBottom:`1px solid ${T.border}`, marginBottom:24 }}>
-        <div style={{ display:"flex", alignItems:"center", gap:11 }}>
-          <div style={{ width:29, height:29, borderRadius:8, background:T.bright,
-            display:"flex", alignItems:"center", justifyContent:"center" }}>
-            <span style={{ fontSize:14, fontWeight:800, color:T.bg }}>F</span>
-          </div>
-          <div style={{ fontSize:16, fontWeight:700, color:T.bright, letterSpacing:"-0.02em" }}>FRIDAY</div>
-          <span style={{ fontSize:11.5, color:T.dim, marginLeft:2, ...MONO }}>{dateStr} · {timeStr}</span>
+        <div style={{ display:"flex", alignItems:"baseline", gap:12 }}>
+          <div style={{ fontSize:17, fontWeight:700, color:T.bright, letterSpacing:"0.04em" }}>FRIDAY</div>
+          <span style={{ fontSize:11.5, color:T.dim, ...MONO }}>{dateStr} · {timeStr}</span>
         </div>
 
         <span style={{ flex:1, minWidth:12 }} />
@@ -1091,8 +1106,8 @@ export default function App() {
             return (
               <span key={s.key} title={`${s.label}: ${on ? "connected" : "tap to connect"}`}
                 onClick={() => on ? doDisconnect(s.provider) : doConnect(s.provider)}
-                style={{ display:"inline-flex", alignItems:"center", gap:5, cursor:"pointer", color:on?T.muted:T.dim }}>
-                <span style={{ width:6, height:6, borderRadius:"50%", background:on?T.bright:T.border }} />
+                style={{ display:"inline-flex", alignItems:"center", gap:5, cursor:"pointer", color:on?T.bright:T.dim }}>
+                <span style={{ width:6, height:6, borderRadius:"50%", background:on?T.ok:T.border, boxShadow:on?`0 0 5px ${T.ok}aa`:"none" }} />
                 <i className={`ti ${s.icon}`} style={{ fontSize:14 }} />
               </span>
             );
@@ -1126,21 +1141,55 @@ export default function App() {
         </div>
       )}
 
-      {/* Lead — today's focus */}
-      <section style={{ marginBottom:28 }}>
-        <div style={{ display:"flex", alignItems:"baseline", gap:10, marginBottom:9 }}>
-          <span style={{ fontSize:11, fontWeight:600, color:T.muted, letterSpacing:".16em", textTransform:"uppercase", ...MONO }}>Today's Focus</span>
-          <span style={{ fontSize:11, color:T.dim, ...MONO }}>as of {timeStr}</span>
-        </div>
-        <div style={{ fontSize:27, fontWeight:600, color:T.bright, lineHeight:1.28, letterSpacing:"-0.025em", maxWidth:900 }}>
-          {summary?.focus_of_day || "Ready when you are."}{!summary?.focus_of_day && <Cursor />}
-        </div>
-        {summary?.risk_flag && (
-          <div style={{ fontSize:13, color:T.red, marginTop:14, display:"flex", alignItems:"flex-start", gap:8, lineHeight:1.55, maxWidth:900 }}>
-            <i className="ti ti-alert-triangle" style={{ fontSize:14, marginTop:2, flexShrink:0 }} />
-            <span><b style={{ fontWeight:600 }}>Risk · </b>{summary.risk_flag}</span>
+      {/* Lead — today's focus (left) + momentum panel (right) */}
+      <section style={{ marginBottom:30, display:"grid", gridTemplateColumns:"minmax(0,1.6fr) minmax(0,1fr)", gap:"40px", alignItems:"start" }}>
+        <div style={{ minWidth:0 }}>
+          <div style={{ display:"flex", alignItems:"baseline", gap:10, marginBottom:9 }}>
+            <span style={{ fontSize:11, fontWeight:600, color:T.muted, letterSpacing:".16em", textTransform:"uppercase", ...MONO }}>Today's Focus</span>
+            <span style={{ fontSize:11, color:T.dim, ...MONO }}>as of {timeStr}</span>
           </div>
-        )}
+          <div style={{ fontSize:26, fontWeight:600, color:T.bright, lineHeight:1.3, letterSpacing:"-0.022em" }}>
+            {summary?.focus_of_day || "Ready when you are."}{!summary?.focus_of_day && <Cursor />}
+          </div>
+          {summary?.risk_flag && (
+            <div style={{ fontSize:13, color:T.red, marginTop:14, display:"flex", alignItems:"flex-start", gap:8, lineHeight:1.55 }}>
+              <i className="ti ti-alert-triangle" style={{ fontSize:14, marginTop:2, flexShrink:0 }} />
+              <span><b style={{ fontWeight:600 }}>Risk · </b>{summary.risk_flag}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Momentum panel */}
+        <div style={{ minWidth:0, background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:"15px 17px" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:14 }}>
+            <span style={{ fontSize:10.5, fontWeight:700, color:T.muted, letterSpacing:".15em", textTransform:"uppercase", ...MONO }}>Momentum</span>
+            <span style={{ flex:1 }} />
+            <button onClick={refreshLoops} disabled={loopsBusy} title="Re-scan"
+              style={{ background:"transparent", border:"none", color:T.dim, cursor:"pointer" }}>
+              <i className={`ti ti-refresh ${loopsBusy?"spin":""}`} style={{ fontSize:13 }} />
+            </button>
+          </div>
+          {(() => {
+            const cleared = (loops?.summary?.slackClosed || 0) + (loops?.summary?.emailClosed || 0);
+            const xp  = cleared * 10;
+            const pct = Math.min(100, cleared * 20);
+            const label = cleared >= 5 ? "on fire 🔥" : cleared >= 3 ? "momentum ⚡" : cleared >= 1 ? "rolling" : "warming up — clear a loop";
+            return (
+              <div>
+                <div style={{ display:"flex", alignItems:"baseline", gap:8, marginBottom:9 }}>
+                  <span style={{ fontSize:26, fontWeight:700, color:cleared>0?T.bright:T.dim, lineHeight:1, ...MONO }}>{cleared}</span>
+                  <span style={{ fontSize:11.5, color:T.muted }}>loops cleared</span>
+                  <span style={{ flex:1 }} />
+                  <span style={{ fontSize:12, fontWeight:600, color:T.muted, ...MONO }}>{xp} XP</span>
+                </div>
+                <div style={{ height:5, background:T.border, borderRadius:3, overflow:"hidden" }}>
+                  <div style={{ height:"100%", width:`${pct}%`, background:cleared>0?T.ok:T.border, borderRadius:3, transition:"width .5s ease" }} />
+                </div>
+                <div style={{ fontSize:11, color:cleared>=3?T.ok:T.dim, marginTop:8, ...MONO }}>{label}</div>
+              </div>
+            );
+          })()}
+        </div>
       </section>
 
       {banner && (
@@ -1180,15 +1229,17 @@ export default function App() {
             const key = `cu-${u.id ?? i}`;
             const open = expanded[key] ?? (i === 0);
             return (
-              <div key={key} className="hovrow" style={{ borderBottom:`1px solid ${T.border}` }}>
+              <div key={key} className="hovcard" style={{ background:T.card, border:`1px solid ${T.border}`,
+                borderLeft:`3px solid ${u.prio==="P1"?T.red:T.border}`, borderRadius:12, marginBottom:11, overflow:"hidden" }}>
                 <div onClick={() => setExpanded(e => ({ ...e, [key]: !open }))}
-                  style={{ display:"flex", alignItems:"flex-start", gap:13, padding:"15px 2px", cursor:"pointer" }}>
-                  <span title={`priority ${u.prio}`} style={{ fontSize:11, fontWeight:700, color:pc[0], flexShrink:0, marginTop:2, width:22, ...MONO }}>{u.prio}</span>
+                  style={{ display:"flex", alignItems:"flex-start", gap:12, padding:"15px 16px", cursor:"pointer" }}>
+                  <span title={`priority ${u.prio}`} style={{ fontSize:10.5, fontWeight:700, color:pc[0], background:pc[1],
+                    border:`1px solid ${pc[0]}33`, borderRadius:6, padding:"2px 7px", flexShrink:0, marginTop:1, ...MONO }}>{u.prio}</span>
                   <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontSize:15.5, fontWeight:600, color:T.bright, lineHeight:1.38 }}>{u.title}</div>
-                    {!open && <div style={{ fontSize:12.5, color:T.dim, lineHeight:1.5, marginTop:3, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{u.detail}</div>}
+                    <div style={{ fontSize:15, fontWeight:600, color:T.bright, lineHeight:1.4 }}>{u.title}</div>
+                    {!open && <div style={{ fontSize:12.5, color:T.dim, lineHeight:1.5, marginTop:4, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{u.detail}</div>}
                     {open && (
-                      <div style={{ marginTop:7 }}>
+                      <div style={{ marginTop:9 }}>
                         <div style={{ fontSize:13.5, color:T.text, lineHeight:1.65 }}>{u.detail}</div>
                         {u.slack_url && <SlackLnk url={u.slack_url} />}
                         {u.gmail_url && <MailLnk url={u.gmail_url} />}
@@ -1203,65 +1254,12 @@ export default function App() {
           })}
         </div>
 
-        {/* THE DAY — schedule + numbers */}
+        {/* RAIL — who's waiting on you */}
         <div style={{ minWidth:0, position:"sticky", top:18 }}>
           <div style={SH}>
-            <span style={SHk}>The Day</span>
-            <span style={{ flex:1 }} />
-            <button onClick={refreshLoops} disabled={loopsBusy} title="Re-scan"
-              style={{ background:"transparent", border:"none", color:T.dim, cursor:"pointer" }}>
-              <i className={`ti ti-refresh ${loopsBusy?"spin":""}`} style={{ fontSize:13 }} />
-            </button>
+            <span style={SHk}>Waiting On You</span>
+            {briefing?.stakeholder_followups?.length>0 && <span style={SHc}>{briefing.stakeholder_followups.length}</span>}
           </div>
-          {renderSchedule()}
-          <div style={{ marginTop:18, paddingTop:16, borderTop:`1px solid ${T.border}`,
-            display:"grid", gridTemplateColumns:"1fr 1fr", gap:"13px 10px" }}>
-            {[[sOpen,"Slack"],[eOpen,"Email"],[meets,"Meets"],[fups,"Follow-ups"]].map(([v,l]) => (
-              <div key={l} style={{ display:"flex", alignItems:"baseline", gap:7 }}>
-                <span style={{ fontSize:21, fontWeight:700, color:v>0?T.bright:T.dim, ...MONO }}>{v}</span>
-                <span style={{ fontSize:11.5, color:T.muted }}>{l}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* ── Open loops ── */}
-      <section style={{ marginTop:36, paddingTop:24, borderTop:`1px solid ${T.border}` }}>
-        <div style={SH}><span style={SHk}>Open Loops</span><span style={SHc}>{sOpen+eOpen+mOpen}</span></div>
-        {renderLoops()}
-      </section>
-
-      {/* ── Decisions · Standup · Stakeholders ── */}
-      <div style={{ marginTop:36, paddingTop:24, borderTop:`1px solid ${T.border}`,
-        display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(255px, 1fr))", gap:"40px", alignItems:"start" }}>
-
-        <div style={{ minWidth:0 }}>
-          <div style={SH}><span style={SHk}>Decisions</span>{briefing?.decisions_needed?.length>0 && <span style={SHc}>{briefing.decisions_needed.length}</span>}</div>
-          {!(briefing?.decisions_needed?.length) ? <Note>no pending decisions</Note> :
-            briefing.decisions_needed.map((d, i) => {
-              const key = `dn-${i}`; const open = expanded[key] ?? false;
-              return (
-                <div key={i} style={{ borderBottom:`1px solid ${T.border}` }}>
-                  <div onClick={() => setExpanded(e => ({ ...e, [key]: !open }))}
-                    style={{ display:"flex", alignItems:"flex-start", gap:10, padding:"13px 2px", cursor:"pointer" }}>
-                    <span style={{ flex:1, fontSize:13.5, fontWeight:600, color:T.bright, lineHeight:1.4 }}>{d.title}</span>
-                    {d.from && <span style={{ fontSize:11, color:T.dim, flexShrink:0, ...M }}>{d.from}</span>}
-                    <i className={`ti ti-chevron-${open?"up":"down"}`} style={{ fontSize:13, color:T.dim, flexShrink:0, marginTop:2 }} />
-                  </div>
-                  {open && <div style={{ padding:"0 2px 13px", fontSize:13, color:T.text, lineHeight:1.6 }}>{d.context}</div>}
-                </div>
-              );
-            })}
-        </div>
-
-        <div style={{ minWidth:0 }}>
-          <div style={SH}><span style={SHk}>Standup</span></div>
-          {renderStandup()}
-        </div>
-
-        <div style={{ minWidth:0 }}>
-          <div style={SH}><span style={SHk}>Stakeholders Waiting</span></div>
           {!(briefing?.stakeholder_followups?.length) ? <Note>nobody's blocked on you</Note> :
             briefing.stakeholder_followups.map((f, i) => (
               <div key={i} style={{ display:"flex", gap:11, alignItems:"flex-start", padding:"12px 2px", borderBottom:`1px solid ${T.border}` }}>
@@ -1277,7 +1275,13 @@ export default function App() {
               </div>
             ))}
         </div>
-      </div>{/* end bottom sections */}
+      </div>
+
+      {/* ── Open loops ── */}
+      <section style={{ marginTop:36, paddingTop:24, borderTop:`1px solid ${T.border}` }}>
+        <div style={SH}><span style={SHk}>Open Loops</span><span style={SHc}>{sOpen+eOpen+mOpen}</span></div>
+        {renderLoops()}
+      </section>
 
       {/* Footer */}
       <div style={{ marginTop:24, paddingTop:14, borderTop:`1px solid ${T.border}`, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10 }}>
