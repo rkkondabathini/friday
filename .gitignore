@@ -19,3 +19,7 @@ npm-debug.log*
 # Internal / personal data — kept local only (real PII & briefing content)
 OrgTree*.csv
 artifacts screenshots/
+Screenshot*.png
+
+# Claude Code local tooling state (per-machine, not shared)
+.claude/
