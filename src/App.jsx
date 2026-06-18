@@ -949,23 +949,7 @@ export default function App() {
   if (view === "team") return (
     <div style={{ background:T.bg, minHeight:"100vh", padding:"24px clamp(16px,4vw,40px) 60px", width:"100%", maxWidth:1480, margin:"0 auto", ...M }}>
       <style>{makeCss(T)}</style>
-      <header style={{ display:"flex", alignItems:"center", gap:13, flexWrap:"wrap",
-        paddingBottom:15, borderBottom:`1px solid ${T.border}`, marginBottom:24 }}>
-        <div style={{ display:"flex", alignItems:"baseline", gap:12 }}>
-          <div style={{ fontSize:17, fontWeight:700, color:T.bright, letterSpacing:"0.04em" }}>FRIDAY</div>
-          <span style={{ fontSize:13, fontWeight:600, color:T.muted }}>Team Management</span>
-        </div>
-        <span style={{ flex:1, minWidth:12 }} />
-        <button onClick={() => setView("cockpit")}
-          style={{ fontSize:12.5, padding:"7px 14px", borderRadius:9, border:`1px solid ${T.border}`, background:"transparent", color:T.muted, display:"inline-flex", alignItems:"center", gap:6, ...M }}>
-          <i className="ti ti-arrow-left" style={{ fontSize:14 }} /> Cockpit
-        </button>
-        <button onClick={toggleTheme} title={theme==="dark"?"Switch to light":"Switch to dark"}
-          style={{ width:34, height:34, borderRadius:9, border:`1px solid ${T.border}`, background:"transparent", color:T.muted, display:"inline-flex", alignItems:"center", justifyContent:"center" }}>
-          <i className={`ti ${theme==="dark"?"ti-sun":"ti-moon"}`} style={{ fontSize:16 }} />
-        </button>
-      </header>
-      <TeamManagement T={T} />
+      <TeamManagement T={T} theme={theme} toggleTheme={toggleTheme} onBack={() => setView("cockpit")} />
     </div>
   );
 
