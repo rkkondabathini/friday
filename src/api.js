@@ -136,3 +136,11 @@ export const runStandup = (pointers) =>
 export const getStandups = () => req("GET", "/api/team/standups");
 export const setTeamAgenda = (points) =>
   req("POST", "/api/team/agenda", { points });
+export const addProject = (member, name, sheet_url) =>
+  req("POST", "/api/team/project", { member, name, sheet_url });
+export const updateProject = (id, name, sheet_url) =>
+  req("POST", "/api/team/project", { id, name, sheet_url });
+export const setProjectStatus = (id, status) =>
+  req("POST", "/api/team/project/status", { id, status });
+export const deleteProject = (id) =>
+  req("DELETE", `/api/team/project/${id}`);

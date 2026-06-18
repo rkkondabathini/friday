@@ -142,6 +142,16 @@ db.exec(`
     next_points TEXT,
     created_at TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS team_projects (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    member TEXT NOT NULL,
+    name TEXT NOT NULL,
+    sheet_url TEXT,
+    status TEXT DEFAULT 'pending',
+    position INTEGER DEFAULT 0,
+    updated_at TEXT
+  );
 `);
 
 // ── Briefings ──────────────────────────────────────────────────
@@ -488,9 +498,23 @@ const getLatestStandup = () => {
   return s ? { ...s, next_points: s.next_points ? JSON.parse(s.next_points) : [] } : null;
 };
 
+// Projects (per team member)
+const getProjects = () => db.prepare("SELECT * FROM team_projects ORDER BY member, position, id").all();
+const countProjectsForMember = (m) => db.prepare("SELECT COUNT(*) c FROM team_projects WHERE member = ?").get(m).c;
+const addProject = (member, name, sheet_url, position = 0) =>
+  db.prepare("INSERT INTO team_projects (member, name, sheet_url, status, position, updated_at) VALUES (?, ?, ?, 'pending', ?, ?)")
+    .run(member, name, sheet_url || null, position, new Date().toISOString()).lastInsertRowid;
+const updateProject = (id, name, sheet_url) =>
+  db.prepare("UPDATE team_projects SET name = COALESCE(?, name), sheet_url = ?, updated_at = ? WHERE id = ?")
+    .run(name || null, sheet_url || null, new Date().toISOString(), id);
+const setProjectStatus = (id, status) =>
+  db.prepare("UPDATE team_projects SET status = ?, updated_at = ? WHERE id = ?").run(status, new Date().toISOString(), id);
+const deleteProject = (id) => db.prepare("DELETE FROM team_projects WHERE id = ?").run(id);
+
 module.exports = {
   setTeamMemberMeta, getTeamMemberMeta, setTeamReport, getTeamReports,
   saveStandup, getStandups, getLatestStandup,
+  getProjects, countProjectsForMember, addProject, updateProject, setProjectStatus, deleteProject,
   saveBriefing, getBriefing, getLatestBriefing, getBriefingHistory,
   setTaskStatus, getTaskOverrides,
   saveCustomTask, getCustomTasks, deleteCustomTask,

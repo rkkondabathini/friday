@@ -248,13 +248,19 @@ const teamMembers = () => {
 
 app.get("/api/team", (req, res) => {
   const ws = weekStartOf();
-  const meta = db.getTeamMemberMeta();
-  const reports = db.getTeamReports(ws);
-  const members = teamMembers().map(m => ({
-    ...m,
-    dashboard_url: (meta[m.name] || {}).dashboard_url || "",
-    report: reports[m.name] || { status: "pending", link: null },
-  }));
+  const base = teamMembers();
+  // First visit per member: seed their project tiles from their allocated responsibilities
+  for (const m of base) {
+    if (db.countProjectsForMember(m.name) === 0)
+      (m.responsibilities || []).forEach((r, i) => db.addProject(m.name, r, null, i));
+  }
+  const all = db.getProjects();
+  const byMember = {};
+  for (const p of all) (byMember[p.member] = byMember[p.member] || []).push(p);
+  const members = base.map(m => ({ ...m, projects: byMember[m.name] || [] }));
+  const stats = { shared: 0, missed: 0, pending: 0 };
+  for (const p of all) stats[p.status] = (stats[p.status] || 0) + 1;
+
   const latest = db.getLatestStandup();
   let agenda = [];
   try { agenda = JSON.parse(db.getSetting("team_agenda") || "null"); } catch {}
@@ -262,10 +268,29 @@ app.get("/api/team", (req, res) => {
   res.json({
     weekStart: ws,
     members,
+    stats,
     agenda,
     latestStandup: latest,
     podStructure: (CTX.central_team && CTX.central_team.structure) || "",
   });
+});
+
+// Projects per member: add / update / status / delete
+app.post("/api/team/project", (req, res) => {
+  const { id, member, name, sheet_url } = req.body || {};
+  if (id) { db.updateProject(id, name, sheet_url); return res.json({ ok: true, id }); }
+  if (!member || !name) return res.status(400).json({ error: "member and name required" });
+  res.json({ ok: true, id: db.addProject(member, name, sheet_url) });
+});
+app.post("/api/team/project/status", (req, res) => {
+  const { id, status } = req.body || {};
+  if (!id || !["shared", "missed", "pending"].includes(status)) return res.status(400).json({ error: "id and valid status required" });
+  db.setProjectStatus(id, status);
+  res.json({ ok: true });
+});
+app.delete("/api/team/project/:id", (req, res) => {
+  db.deleteProject(req.params.id);
+  res.json({ ok: true });
 });
 
 // Set / edit the upcoming standup discussion points directly
