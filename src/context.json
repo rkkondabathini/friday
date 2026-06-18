@@ -84,7 +84,7 @@
         { "name": "Aravind", "responsibilities": ["Program Master — SoT for all batches, LMS batch info, key resources", "Product concerns — fix through tech, not just process", "Deviations tracking & management", "LMS section management", "Ad hoc structural fixes"], "backup": "Rajesh (RK on ad hoc)" }
       ],
       "POD B": [
-        { "name": "Rahul", "responsibilities": ["Zoom account & link management", "Lecture creation", "Payouts — kits, campus immersions, certificates, offline exam, faculty & mentor"], "backup": "Yashas / Raza (RK on Zoom)" },
+        { "name": "Rahul", "designation": "Business Analyst L2", "responsibilities": ["Zoom account & link management", "Lecture creation", "Payouts — kits, campus immersions, certificates, offline exam, faculty & mentor"], "backup": "Yashas / Raza (RK on Zoom)", "note": "Designation corrected from Operations Manager L2 → Business Analyst L2 (Jun 2026). Growing toward a dedicated data/analytics role; near-term focus is automating the ~10-day payouts cycle to free bandwidth for higher-value analytical work." },
         { "name": "Raza", "responsibilities": ["Student kits data & vendor coordination", "Post-batch eligible student data handover to placements", "Provisional scorecards + certificate issuance (soft + hard copy)"], "backup": "Yashas" },
         { "name": "Yashas", "responsibilities": ["Evaluations — full ownership of online + offline, plagiarism", "Central calendar — SoT for all 70–80 active batches", "Agreement creation & mapping at cohort level (two-pager + long)", "MOU creation & management"], "backup": "Rahul / Raza" }
       ]
