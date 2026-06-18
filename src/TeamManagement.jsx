@@ -36,6 +36,7 @@ export default function TeamManagement({ T, theme, toggleTheme, onBack }) {
   const [err, setErr] = useState(null);
   const [editUrl, setEditUrl] = useState({});
   const [showHistory, setShowHistory] = useState(false);
+  const [editAgenda, setEditAgenda] = useState(null);   // null = not editing; string = draft
 
   const load = async () => {
     try { setTeam(await api.getTeam()); } catch (e) { setErr(e.message); }
@@ -57,9 +58,14 @@ export default function TeamManagement({ T, theme, toggleTheme, onBack }) {
     setBusy(false);
   };
 
+  const saveAgenda = async () => {
+    const points = (editAgenda || "").split("\n").map(l => l.replace(/^[-*\d.)\s]+/, "").trim()).filter(Boolean);
+    await api.setTeamAgenda(points); setEditAgenda(null); load();
+  };
+
   const card = { background: T.card, border: `1px solid ${T.border}`, borderRadius: 12 };
   const members = team?.members || [];
-  const nextPoints = team?.latestStandup?.next_points || [];
+  const nextPoints = team?.agenda || [];
   const sharedCount = members.filter(m => m.report?.status === "shared").length;
   const missingCount = members.filter(m => m.report?.status === "missing").length;
 
@@ -160,14 +166,22 @@ export default function TeamManagement({ T, theme, toggleTheme, onBack }) {
         <div style={{ ...card, padding: "16px 18px", display: "flex", flexDirection: "column" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
             <i className="ti ti-clipboard-list" style={{ fontSize: 16, color: T.bright }} />
-            <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".14em", color: T.muted }}>STANDUP — DISCUSSION POINTS</span>
+            <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".14em", color: T.muted, flex: 1 }}>STANDUP — DISCUSSION POINTS</span>
+            {editAgenda === null
+              ? <button onClick={() => setEditAgenda(nextPoints.join("\n"))} style={{ fontSize: 11.5, color: T.dim, background: "none", border: "none" }}><i className="ti ti-pencil" style={{ fontSize: 12 }} /> edit</button>
+              : <span><button onClick={saveAgenda} style={{ fontSize: 11.5, color: T.ok, background: "none", border: "none", fontWeight: 600 }}>save</button><button onClick={() => setEditAgenda(null)} style={{ fontSize: 11.5, color: T.dim, background: "none", border: "none", marginLeft: 8 }}>cancel</button></span>}
           </div>
-          {nextPoints.length ? (
+          {editAgenda !== null ? (
+            <textarea value={editAgenda} onChange={e => setEditAgenda(e.target.value)}
+              placeholder={"One discussion point per line…"}
+              style={{ flex: 1, minHeight: 160, width: "100%", fontSize: 13, padding: "11px 13px", borderRadius: 9,
+                border: `1px solid ${T.border}`, background: T.bg, color: T.text, resize: "vertical", lineHeight: 1.5, fontFamily: "inherit" }} />
+          ) : nextPoints.length ? (
             <ol style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 8 }}>
               {nextPoints.map((p, i) => <li key={i} style={{ fontSize: 13, color: T.text, lineHeight: 1.45 }}>{p}</li>)}
             </ol>
           ) : (
-            <div style={{ fontSize: 13, color: T.dim, margin: "auto 0" }}>No agenda yet — run a standup and FRIDAY builds next week's points automatically.</div>
+            <div style={{ fontSize: 13, color: T.dim, margin: "auto 0" }}>No agenda yet — click <b>edit</b> to set points, or run a standup and FRIDAY builds next week's automatically.</div>
           )}
         </div>
         {/* Pointers for MOM (capture) */}

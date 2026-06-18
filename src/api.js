@@ -134,3 +134,5 @@ export const setTeamReport = (member, status, link, note) =>
 export const runStandup = (pointers) =>
   req("POST", "/api/team/standup", { pointers });
 export const getStandups = () => req("GET", "/api/team/standups");
+export const setTeamAgenda = (points) =>
+  req("POST", "/api/team/agenda", { points });

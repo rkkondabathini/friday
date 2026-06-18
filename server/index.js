@@ -255,12 +255,25 @@ app.get("/api/team", (req, res) => {
     dashboard_url: (meta[m.name] || {}).dashboard_url || "",
     report: reports[m.name] || { status: "pending", link: null },
   }));
+  const latest = db.getLatestStandup();
+  let agenda = [];
+  try { agenda = JSON.parse(db.getSetting("team_agenda") || "null"); } catch {}
+  if (!Array.isArray(agenda) || !agenda.length) agenda = latest ? latest.next_points : [];
   res.json({
     weekStart: ws,
     members,
-    latestStandup: db.getLatestStandup(),
+    agenda,
+    latestStandup: latest,
     podStructure: (CTX.central_team && CTX.central_team.structure) || "",
   });
+});
+
+// Set / edit the upcoming standup discussion points directly
+app.post("/api/team/agenda", (req, res) => {
+  const { points } = req.body || {};
+  if (!Array.isArray(points)) return res.status(400).json({ error: "points array required" });
+  db.setSetting("team_agenda", JSON.stringify(points.filter(p => p && p.trim())));
+  res.json({ ok: true });
 });
 
 app.post("/api/team/member", (req, res) => {
@@ -317,6 +330,7 @@ Rules for the NEXT section: roll forward unresolved items + anyone whose report 
     const mom = (momRaw || clean).replace(/===\s*MOM\s*===/i, "").trim();
     const next_points = nextRaw.split("\n").map(l => l.replace(/^[-*\d.)\s]+/, "").replace(/\*\*/g, "").trim()).filter(Boolean).slice(0, 8);
     db.saveStandup({ date: todayInTz(), week_start: ws, pointers: pointers.trim(), mom, next_points });
+    db.setSetting("team_agenda", JSON.stringify(next_points)); // roll forward into the agenda panel
     res.json({ ok: true, standup: db.getLatestStandup() });
   } catch (e) {
     if (e && e.isClaudeLimit) return res.status(429).json({ error: "Claude is at its usage limit — try again later." });
