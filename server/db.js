@@ -115,6 +115,35 @@ db.exec(`
   );
 `);
 
+// ── Team Management ────────────────────────────────────────────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS team_member_meta (
+    member TEXT PRIMARY KEY,
+    dashboard_url TEXT,
+    updated_at TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS team_reports (
+    member TEXT NOT NULL,
+    week_start TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    link TEXT,
+    note TEXT,
+    updated_at TEXT,
+    PRIMARY KEY (member, week_start)
+  );
+
+  CREATE TABLE IF NOT EXISTS team_standups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL,
+    week_start TEXT,
+    pointers TEXT,
+    mom TEXT,
+    next_points TEXT,
+    created_at TEXT NOT NULL
+  );
+`);
+
 // ── Briefings ──────────────────────────────────────────────────
 const saveBriefing = (date, data, source = "manual") => {
   const stmt = db.prepare(`
@@ -416,7 +445,52 @@ const countVectors = () => {
 const sampleVectorText = (limit = 120) =>
   db.prepare("SELECT source, date, title, text FROM memory_vectors ORDER BY date DESC LIMIT ?").all(limit);
 
+// ── Team Management ────────────────────────────────────────────
+const setTeamMemberMeta = (member, dashboard_url) =>
+  db.prepare(`
+    INSERT INTO team_member_meta (member, dashboard_url, updated_at) VALUES (?, ?, ?)
+    ON CONFLICT(member) DO UPDATE SET dashboard_url = excluded.dashboard_url, updated_at = excluded.updated_at
+  `).run(member, dashboard_url || null, new Date().toISOString());
+
+const getTeamMemberMeta = () => {
+  const out = {};
+  for (const r of db.prepare("SELECT * FROM team_member_meta").all()) out[r.member] = r;
+  return out;
+};
+
+const setTeamReport = (member, week_start, status, link, note) =>
+  db.prepare(`
+    INSERT INTO team_reports (member, week_start, status, link, note, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(member, week_start) DO UPDATE SET
+      status = excluded.status, link = COALESCE(excluded.link, team_reports.link),
+      note = COALESCE(excluded.note, team_reports.note), updated_at = excluded.updated_at
+  `).run(member, week_start, status || "pending", link || null, note || null, new Date().toISOString());
+
+const getTeamReports = (week_start) => {
+  const out = {};
+  for (const r of db.prepare("SELECT * FROM team_reports WHERE week_start = ?").all(week_start)) out[r.member] = r;
+  return out;
+};
+
+const saveStandup = ({ date, week_start, pointers, mom, next_points }) =>
+  db.prepare(`
+    INSERT INTO team_standups (date, week_start, pointers, mom, next_points, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(date, week_start || null, pointers || null, mom || null,
+         next_points ? JSON.stringify(next_points) : null, new Date().toISOString());
+
+const getStandups = (limit = 12) =>
+  db.prepare("SELECT * FROM team_standups ORDER BY id DESC LIMIT ?").all(limit)
+    .map(s => ({ ...s, next_points: s.next_points ? JSON.parse(s.next_points) : [] }));
+
+const getLatestStandup = () => {
+  const s = db.prepare("SELECT * FROM team_standups ORDER BY id DESC LIMIT 1").get();
+  return s ? { ...s, next_points: s.next_points ? JSON.parse(s.next_points) : [] } : null;
+};
+
 module.exports = {
+  setTeamMemberMeta, getTeamMemberMeta, setTeamReport, getTeamReports,
+  saveStandup, getStandups, getLatestStandup,
   saveBriefing, getBriefing, getLatestBriefing, getBriefingHistory,
   setTaskStatus, getTaskOverrides,
   saveCustomTask, getCustomTasks, deleteCustomTask,

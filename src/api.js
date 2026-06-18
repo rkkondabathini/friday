@@ -124,3 +124,13 @@ export const addDirective = (text) =>
 
 export const deleteDirective = (id) =>
   req("DELETE", `/api/directives/${id}`);
+
+// ── Team Management ────────────────────────────────────────────
+export const getTeam = () => req("GET", "/api/team");
+export const setTeamMember = (member, dashboard_url) =>
+  req("POST", "/api/team/member", { member, dashboard_url });
+export const setTeamReport = (member, status, link, note) =>
+  req("POST", "/api/team/report", { member, status, link, note });
+export const runStandup = (pointers) =>
+  req("POST", "/api/team/standup", { pointers });
+export const getStandups = () => req("GET", "/api/team/standups");

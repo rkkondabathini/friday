@@ -228,6 +228,103 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
+// ── Team Management ────────────────────────────────────────────
+const CTX = require("../src/context.json");
+// Monday (week start) for a date, in user TZ, as YYYY-MM-DD
+const weekStartOf = (d = new Date()) => {
+  const local = new Date(d.toLocaleString("en-US", { timeZone: USER_TZ }));
+  const day = (local.getDay() + 6) % 7; // 0 = Monday
+  local.setDate(local.getDate() - day);
+  const y = local.getFullYear(), m = String(local.getMonth() + 1).padStart(2, "0"), dd = String(local.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`; // avoid UTC shift from toISOString on a TZ-localized date
+};
+const teamMembers = () => {
+  const pods = (CTX.central_team && CTX.central_team.pods) || {};
+  const out = [];
+  for (const [pod, members] of Object.entries(pods))
+    for (const m of members) out.push({ name: m.name, pod, designation: m.designation || "", responsibilities: m.responsibilities || [], backup: m.backup || "" });
+  return out;
+};
+
+app.get("/api/team", (req, res) => {
+  const ws = weekStartOf();
+  const meta = db.getTeamMemberMeta();
+  const reports = db.getTeamReports(ws);
+  const members = teamMembers().map(m => ({
+    ...m,
+    dashboard_url: (meta[m.name] || {}).dashboard_url || "",
+    report: reports[m.name] || { status: "pending", link: null },
+  }));
+  res.json({
+    weekStart: ws,
+    members,
+    latestStandup: db.getLatestStandup(),
+    podStructure: (CTX.central_team && CTX.central_team.structure) || "",
+  });
+});
+
+app.post("/api/team/member", (req, res) => {
+  const { member, dashboard_url } = req.body || {};
+  if (!member) return res.status(400).json({ error: "member required" });
+  db.setTeamMemberMeta(member, dashboard_url);
+  res.json({ ok: true });
+});
+
+app.post("/api/team/report", (req, res) => {
+  const { member, status, link, note } = req.body || {};
+  if (!member) return res.status(400).json({ error: "member required" });
+  db.setTeamReport(member, weekStartOf(), status, link, note);
+  res.json({ ok: true, weekStart: weekStartOf() });
+});
+
+app.get("/api/team/standups", (req, res) => {
+  res.json({ standups: db.getStandups(12) });
+});
+
+// Capture raw standup pointers → FRIDAY writes the MOM + next-week discussion points
+app.post("/api/team/standup", async (req, res) => {
+  try {
+    const { pointers } = req.body || {};
+    if (!pointers || !pointers.trim()) return res.status(400).json({ error: "pointers required" });
+    const ws = weekStartOf();
+    const reports = db.getTeamReports(ws);
+    const missing = teamMembers().filter(m => (reports[m.name] || {}).status !== "shared").map(m => m.name);
+    const lastNext = (db.getLatestStandup() || {}).next_points || [];
+
+    const prompt =
+`You are writing the Minutes of Meeting (MOM) for a weekly Friday team standup, then deriving next week's discussion points.
+
+TEAM: ${teamMembers().map(m => `${m.name} (owns: ${m.responsibilities.join(", ")})`).join(" | ")}
+REPORTS NOT SHARED THIS WEEK: ${missing.length ? missing.join(", ") : "none"}
+LAST WEEK'S CARRIED DISCUSSION POINTS: ${lastNext.length ? lastNext.join("; ") : "none"}
+
+RAW POINTERS CAPTURED IN TODAY'S STANDUP (rough notes, may be per-person):
+${pointers.trim()}
+
+Respond in EXACTLY this format and nothing else (no code fences, no preamble):
+===MOM===
+<clean, well-structured Minutes of Meeting in markdown — group by person/topic, capture decisions, owners and any blockers. Concise and executive.>
+===NEXT===
+- <discussion point for next week>
+- <...>
+
+Rules for the NEXT section: roll forward unresolved items + anyone whose report was not shared + any blockers/owners pending. 4-8 crisp items, each actionable, one per line starting with "- ".`;
+
+    let reply = await ai.chat([{ role: "user", content: prompt }], "", 2500);
+    // Robust delimiter parse (avoids JSON-escaping issues with multi-line markdown)
+    const clean = reply.replace(/```[a-z]*\n?/gi, "").trim();
+    const [momRaw, nextRaw = ""] = clean.split(/===\s*NEXT\s*===/i);
+    const mom = (momRaw || clean).replace(/===\s*MOM\s*===/i, "").trim();
+    const next_points = nextRaw.split("\n").map(l => l.replace(/^[-*\d.)\s]+/, "").replace(/\*\*/g, "").trim()).filter(Boolean).slice(0, 8);
+    db.saveStandup({ date: todayInTz(), week_start: ws, pointers: pointers.trim(), mom, next_points });
+    res.json({ ok: true, standup: db.getLatestStandup() });
+  } catch (e) {
+    if (e && e.isClaudeLimit) return res.status(429).json({ error: "Claude is at its usage limit — try again later." });
+    console.error("Standup MOM error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── Memory endpoint ────────────────────────────────────────────
 app.post("/api/memory", (req, res) => {
   const { type, content } = req.body;
