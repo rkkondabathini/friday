@@ -647,7 +647,8 @@ const runBriefingJob = async ({ force = false } = {}) => {
     briefing.open_loops = { slack: openLoops.slackOpen, email: openLoops.emailOpen, summary: s };
   }
 
-  // Daily lessons (TWO per day): keep them stable across regenerations, and remember
+  // Daily lessons (THREE per day; #3 is always people/team management): keep them
+  // stable across regenerations, and remember
   // the topics so we never repeat. (No extra Claude calls — part of the briefing.)
   const today = todayInTz();
   if (db.getSetting("lesson_day") === today && db.getSetting("lesson_json")) {
