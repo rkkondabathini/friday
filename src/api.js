@@ -144,3 +144,7 @@ export const setProjectStatus = (id, status) =>
   req("POST", "/api/team/project/status", { id, status });
 export const deleteProject = (id) =>
   req("DELETE", `/api/team/project/${id}`);
+
+// ── Corrections (report a wrong briefing flag) ─────────────────
+export const addCorrection = (original, correction) =>
+  req("POST", "/api/corrections", { original, correction });

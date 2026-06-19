@@ -364,6 +364,15 @@ Rules for the NEXT section: roll forward unresolved items + anyone whose report 
   }
 });
 
+// Report a wrong briefing flag → FRIDAY learns and stops repeating it
+app.post("/api/corrections", (req, res) => {
+  const { original, correction } = req.body || {};
+  if (!correction || !correction.trim()) return res.status(400).json({ error: "correction required" });
+  db.addCorrection(original, correction.trim());
+  logMemory("correction", `A briefing flag was wrong${original ? ` — "${String(original).slice(0, 120)}"` : ""}: ${correction.trim()}`);
+  res.json({ ok: true });
+});
+
 // ── Memory endpoint ────────────────────────────────────────────
 app.post("/api/memory", (req, res) => {
   const { type, content } = req.body;
@@ -636,8 +645,9 @@ const runBriefingJob = async ({ force = false } = {}) => {
   const carryForward = db.getCarryForwardTasks();
   const directives = db.getDirectives().map(d => d.text);
   const learnedTopics = JSON.parse(db.getSetting("learned_topics") || "[]");
+  const corrections = db.getCorrections(20);
   const openLoops = await gatherOpenLoops(true).catch(() => null);
-  const briefing = await generateBriefing(gmail, calendar, slackMsgs, carryForward, directives, learnedTopics, openLoops);
+  const briefing = await generateBriefing(gmail, calendar, slackMsgs, carryForward, directives, learnedTopics, openLoops, corrections);
 
   // Passive learning: record what was open vs closed so FRIDAY learns your real
   // response behaviour over time (which channels/people you close fast vs let slide).

@@ -301,6 +301,9 @@ export default function App() {
   const [loopsBusy,setLoopsBusy]= useState(false);
   const [newLoop,  setNewLoop]  = useState("");
   const [expanded, setExpanded] = useState({});
+  const [correcting, setCorrecting] = useState(null);   // which flag key is being corrected
+  const [correctText, setCorrectText] = useState("");
+  const [corrected,  setCorrected]  = useState({});     // flag key -> reported
   const [copied,   setCopied]   = useState(null);   // which prepared draft was just copied
   const [learnOpen, setLearnOpen] = useState(false);
   const [learnRead, setLearnRead] = useState(() => { try { return localStorage.getItem("friday_learn_read"); } catch { return null; } });
@@ -414,6 +417,13 @@ export default function App() {
   const doneLoop = async (id) => {
     try { const r = await api.doneManualLoop(id); setLoops(l => ({ ...(l || {}), manual: r.manual })); } catch {}
   };
+  const sendCorrection = async (key, u) => {
+    if (!correctText.trim()) return;
+    try { await api.addCorrection(u.title || "", correctText.trim()); } catch {}
+    setCorrected(c => ({ ...c, [key]: true }));
+    setCorrecting(null); setCorrectText("");
+  };
+
   const openLearn = () => {
     setLearnOpen(o => !o);
     const arr = Array.isArray(data?.learn) ? data.learn : (data?.learn?.title ? [data.learn] : []);
@@ -1255,8 +1265,27 @@ export default function App() {
                     {open && (
                       <div style={{ marginTop:9 }}>
                         <div style={{ fontSize:13.5, color:T.text, lineHeight:1.65 }}>{u.detail}</div>
-                        {u.slack_url && <SlackLnk url={u.slack_url} />}
-                        {u.gmail_url && <MailLnk url={u.gmail_url} />}
+                        <div onClick={e => e.stopPropagation()} style={{ display:"flex", alignItems:"center", gap:12, marginTop:8, flexWrap:"wrap" }}>
+                          {u.slack_url && <SlackLnk url={u.slack_url} />}
+                          {u.gmail_url && <MailLnk url={u.gmail_url} />}
+                          {corrected[key] ? (
+                            <span style={{ fontSize:11.5, color:T.ok, display:"inline-flex", alignItems:"center", gap:4 }}><i className="ti ti-check" /> thanks — FRIDAY will learn this</span>
+                          ) : correcting === key ? (
+                            <span style={{ display:"inline-flex", gap:6, flex:1, minWidth:210 }}>
+                              <input autoFocus value={correctText} onChange={e => setCorrectText(e.target.value)}
+                                onKeyDown={e => { if (e.key === "Enter") sendCorrection(key, u); if (e.key === "Escape") setCorrecting(null); }}
+                                placeholder="What's wrong? e.g. this is about lectures, not payouts"
+                                style={{ flex:1, fontSize:12, padding:"5px 9px", borderRadius:7, border:`1px solid ${T.border}`, background:T.bg, color:T.text }} />
+                              <button onClick={() => sendCorrection(key, u)} style={{ fontSize:12, padding:"5px 11px", borderRadius:7, border:"none", background:T.bright, color:T.bg, fontWeight:600 }}>Send</button>
+                            </span>
+                          ) : (
+                            <button onClick={() => { setCorrecting(key); setCorrectText(""); }}
+                              title="Report a wrong flag — FRIDAY will learn and correct over time"
+                              style={{ fontSize:11, color:T.dim, background:"none", border:`1px solid ${T.border}`, borderRadius:6, padding:"3px 8px", display:"inline-flex", alignItems:"center", gap:4 }}>
+                              <i className="ti ti-alert-circle" style={{ fontSize:12 }} /> flag wrong
+                            </button>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>

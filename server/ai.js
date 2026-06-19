@@ -249,7 +249,7 @@ const compactOpenLoops = (loops) => {
   return `${man ? man + "\n" : ""}${s || "  (no open Slack tags)"}\n${e || "  (no open emails)"}`;
 };
 
-const generateBriefing = async (gmailData, calendarData, slackData, carryForwardTasks = [], directives = [], learnedTopics = [], openLoops = null) => {
+const generateBriefing = async (gmailData, calendarData, slackData, carryForwardTasks = [], directives = [], learnedTopics = [], openLoops = null, corrections = []) => {
   const tz = context.user.timezone;
   const today = new Date().toLocaleDateString("en-IN", { weekday: "long", day: "2-digit", month: "long", year: "numeric", timeZone: tz });
   const wh = context.user.work_hours || { start: "12:00", end: "21:00" };
@@ -266,6 +266,7 @@ THINK LIKE A CHIEF OF STAFF, NOT A LIST-MAKER. Your single most valuable job is 
 CHANNEL WEIGHTING (important): His real work happens on SLACK and IN-PERSON. Treat SLACK mentions, threads and unanswered tags as the PRIMARY, highest-signal source — lead the briefing, standup and action items with them. EMAIL is mainly an official record and EXTERNAL channel; treat it as lower-signal and only elevate an email if it is an external escalation, a formal/legal notice, or an official decision needing his sign-off. Do not pad the briefing with routine email noise.
 
 ${directives.length ? `== STANDING PRIORITIES (weight heavily across the whole briefing) ==\n${directives.map((d, i) => `${i + 1}. ${d}`).join("\n")}\n` : ""}
+${corrections.length ? `== CORRECTIONS RAVI HAS MADE (he flagged these as wrong before — LEARN from them and do NOT repeat the misclassification when writing today's flags) ==\n${corrections.map(c => `- ${c.original ? `"${String(c.original).slice(0, 90)}" → ` : ""}${c.correction}`).join("\n")}\n` : ""}
 == INPUT DATA ==
 GMAIL (received + sent). [TO-ME] = he is in the To line (a real ask — may need his reply); [cc/fyi] = he is only Cc'd (FYI/awareness, NOT a reply obligation — IGNORE unless it is a clear escalation, a leadership/founder ask, or money/student at risk). {curly braces} = his OWN Gmail triage labels — trust them: a "Base Secured" (done) label means resolved (do NOT surface it), an action label means HE flagged it to act on, "Command Await" = waiting on someone else, "Spectate" = FYI only:
 ${compactGmail(gmailData)}

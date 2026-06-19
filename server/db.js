@@ -152,6 +152,13 @@ db.exec(`
     position INTEGER DEFAULT 0,
     updated_at TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS corrections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    original TEXT,
+    correction TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
 `);
 
 // ── Briefings ──────────────────────────────────────────────────
@@ -511,10 +518,18 @@ const setProjectStatus = (id, status) =>
   db.prepare("UPDATE team_projects SET status = ?, updated_at = ? WHERE id = ?").run(status, new Date().toISOString(), id);
 const deleteProject = (id) => db.prepare("DELETE FROM team_projects WHERE id = ?").run(id);
 
+// Corrections — Ravi flags a wrong briefing item; fed back into future briefings
+const addCorrection = (original, correction) =>
+  db.prepare("INSERT INTO corrections (original, correction, created_at) VALUES (?, ?, ?)")
+    .run(original || null, correction, new Date().toISOString());
+const getCorrections = (limit = 20) =>
+  db.prepare("SELECT * FROM corrections ORDER BY id DESC LIMIT ?").all(limit);
+
 module.exports = {
   setTeamMemberMeta, getTeamMemberMeta, setTeamReport, getTeamReports,
   saveStandup, getStandups, getLatestStandup,
   getProjects, countProjectsForMember, addProject, updateProject, setProjectStatus, deleteProject,
+  addCorrection, getCorrections,
   saveBriefing, getBriefing, getLatestBriefing, getBriefingHistory,
   setTaskStatus, getTaskOverrides,
   saveCustomTask, getCustomTasks, deleteCustomTask,
